@@ -98,24 +98,28 @@ function findCachedElectronZip(name) {
 
   // 6. Small setup package: the app (app.asar) + a script that fetches the
   //    official Electron runtime from GitHub on the target PC and verifies it.
+  //    Flat layout, so "Extract All" shows one thing to double-click:
+  //      Install Inkleaf PDF.cmd   README.txt   files\ (app.asar, setup.ps1, ...)
   if (arch === "x64") {
     const cacheZip = findCachedElectronZip(`electron-v${electronVersion}-win32-x64.zip`);
     const sha = require("crypto").createHash("sha256").update(fs.readFileSync(cacheZip)).digest("hex");
     const setupName = "InkleafPDF-Setup";
     const sdir = path.join(DIST, setupName);
     fs.rmSync(sdir, { recursive: true, force: true });
-    fs.mkdirSync(sdir, { recursive: true });
-    fs.copyFileSync(path.join(final, "resources", "app.asar"), path.join(sdir, "app.asar"));
-    fs.copyFileSync(path.join(ROOT, "electron", "icon.ico"), path.join(sdir, "icon.ico"));
-    copyDir(path.join(final, "licenses"), path.join(sdir, "licenses"));
-    for (const f of ["Setup.cmd", "setup.ps1", "Uninstall.cmd", "README.txt"]) {
+    const files = path.join(sdir, "files");
+    fs.mkdirSync(files, { recursive: true });
+    fs.copyFileSync(path.join(final, "resources", "app.asar"), path.join(files, "app.asar"));
+    fs.copyFileSync(path.join(ROOT, "electron", "icon.ico"), path.join(files, "icon.ico"));
+    copyDir(path.join(final, "licenses"), path.join(files, "licenses"));
+    const place = { "Setup.cmd": "Install Inkleaf PDF.cmd", "README.txt": "README.txt", "setup.ps1": "files/setup.ps1", "Uninstall.cmd": "files/Uninstall.cmd" };
+    for (const [f, to] of Object.entries(place)) {
       let txt = fs.readFileSync(path.join(ROOT, "windows", f), "utf8");
       txt = txt.replace("__APP_VERSION__", pkg.version).replace("__ELECTRON_VERSION__", electronVersion).replace("__ELECTRON_SHA256__", sha);
-      fs.writeFileSync(path.join(sdir, f), txt.replace(/\r?\n/g, "\r\n"));
+      fs.writeFileSync(path.join(sdir, to), txt.replace(/\r?\n/g, "\r\n"));
     }
     const szip = path.join(DIST, `${setupName}.zip`);
     fs.rmSync(szip, { force: true });
-    execFileSync("zip", ["-q", "-r", "-9", szip, setupName], { cwd: DIST });
+    execFileSync("zip", ["-q", "-r", "-9", szip, "."], { cwd: sdir });
     console.log("Built", szip, (fs.statSync(szip).size / 1e6).toFixed(1) + " MB", "(electron sha256 " + sha + ")");
   }
 })().catch((e) => { console.error(e); process.exit(1); });

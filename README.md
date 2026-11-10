@@ -16,10 +16,12 @@ A fast PDF reader and markup app for Windows tablets like the Surface Pro, for t
 
 You need Windows 10 or 11 on a 64-bit Intel or AMD PC, such as a Surface Pro 9 with an Intel Core i5 or i7. You also need an internet connection while setup runs, and you don't need administrator rights.
 
-1. Download **`InkleafPDF-Setup.zip`** (about 5 MB) from the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases/latest).
+1. Download **`InkleafPDF-Setup.zip`** (about 5 MB) from the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases/latest). Don't use the green **Code → Download ZIP** button; that gives you the source code, not the installer.
 2. Right-click the zip and choose **Extract All…**, then **Extract**. Setup doesn't work from inside the zip.
-3. Open the extracted folder and double-click **`Setup.cmd`**.
+3. The extracted folder holds **Install Inkleaf PDF**, **README** and a **files** folder. Double-click **Install Inkleaf PDF**.
+   - Its full name is `Install Inkleaf PDF.cmd`, but Windows usually hides the `.cmd` ending.
    - If Windows shows *"Windows protected your PC"*, click **More info**, then **Run anyway**. This appears because the app isn't code-signed.
+   - If **Install Inkleaf PDF** is missing (some antivirus or company policies remove `.cmd` files), open the **files** folder, right-click **setup** (`setup.ps1`) and choose **Run with PowerShell**.
 4. A setup window opens and does three things:
    - it downloads the app's runtime (about 160 MB) from Electron's official GitHub releases;
    - it checks the download's SHA-256 fingerprint;
@@ -33,7 +35,7 @@ Right-click any PDF in File Explorer and choose **Open with**, then **Choose ano
 
 ### Update
 
-Download the new `InkleafPDF-Setup.zip` and run its `Setup.cmd` the same way. Your settings, drawing scales and last-opened file are kept.
+Download the new `InkleafPDF-Setup.zip` and run its **Install Inkleaf PDF** the same way. Your settings, drawing scales and last-opened file are kept.
 
 ### Uninstall
 
@@ -160,7 +162,8 @@ In the app, **⋯ → Keyboard & touch help** shows this list.
 | Problem | What to do |
 |---|---|
 | *"Windows protected your PC"* when running Setup | Click **More info**, then **Run anyway**. The app isn't code-signed. |
-| Setup says it couldn't download, or the safety check failed | Check your internet connection and run `Setup.cmd` again. If your network blocks github.com, use `InkleafPDF-win-x64.zip` and `Install.cmd` instead (see [Other ways to install](#other-ways-to-install)). |
+| Can't find **Install Inkleaf PDF** after extracting | Make sure you extracted `InkleafPDF-Setup.zip` (the installer), not the repository's source-code zip. If it's still missing, use **files → setup → Run with PowerShell** as described in [Install](#install). |
+| Setup says it couldn't download, or the safety check failed | Check your internet connection and run **Install Inkleaf PDF** again. If your network blocks github.com, use `InkleafPDF-win-x64.zip` and `Install.cmd` instead (see [Other ways to install](#other-ways-to-install)). |
 | *"Couldn't save"* | The file may be open in another app, or in a read-only or locked folder. Use **Save as…** to save a copy somewhere else. |
 | Measurements look wrong | Check the scale on the measuring bar. *Scale not set* means 1:1 (real paper size). Set the scale or calibrate. |
 | A finger draws instead of panning | The finger button (**T**) is on. Tap it to turn it off. |
@@ -181,7 +184,7 @@ Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with
 | `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. |
 | `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, and the open/save flow. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
-| `windows/` | Installer scripts (`Setup.cmd` + `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
+| `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Inkleaf PDF.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
 | `tools/devserver.js` | Runs the same UI in a normal browser for testing. |
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
@@ -210,7 +213,7 @@ node tools/build-win.js arm64   # ARM (Surface Pro with Microsoft SQ chips)
 
 The x64 build produces:
 
-- `dist/InkleafPDF-Setup.zip`: the small installer (the app plus `Setup.cmd`; the runtime is downloaded and verified during setup).
+- `dist/InkleafPDF-Setup.zip`: the small installer. It holds `Install Inkleaf PDF.cmd` (built from `windows/Setup.cmd`), `README.txt`, and a `files` folder with the app and `setup.ps1`. The runtime is downloaded and verified during setup.
 - `dist/InkleafPDF-win-x64.zip`: the full app with the runtime included (`Install.cmd`).
 
 The ARM build produces `dist/InkleafPDF-win-arm64.zip` only.

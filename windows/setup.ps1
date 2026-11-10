@@ -2,6 +2,10 @@
 # Downloads the official Electron runtime from GitHub, verifies its SHA-256,
 # adds the Inkleaf app (app.asar) and creates shortcuts.
 # Compatible with Windows PowerShell 5.1. Keep this file ASCII-only.
+# Lives in the package's "files" folder; "Install Inkleaf PDF.cmd" runs it
+# with -FromLauncher. Run on its own ("Run with PowerShell"), it waits for
+# Enter before closing so the result can be read.
+param([switch]$FromLauncher)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -12,6 +16,7 @@ $ElectronSha256 = '__ELECTRON_SHA256__'
 
 $onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$top = Split-Path -Parent $here
 $dest = Join-Path $env:LOCALAPPDATA 'Programs\Inkleaf PDF'
 $exe = Join-Path $dest 'InkleafPDF.exe'
 $icon = Join-Path $dest 'icon.ico'
@@ -36,6 +41,10 @@ function Test-Sha([string]$path) {
   return ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -eq $ElectronSha256.ToUpper())
 }
 
+function Wait-IfStandalone {
+  if (-not $FromLauncher) { Write-Host ''; Read-Host 'Press Enter to close' | Out-Null }
+}
+
 function Set-RegValue([string]$key, [string]$name, $value, [string]$type) {
   if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force | Out-Null }
   New-ItemProperty -LiteralPath $key -Name $name -Value $value -PropertyType $type -Force | Out-Null
@@ -48,7 +57,7 @@ try {
 
   $asar = Join-Path $here 'app.asar'
   if (-not (Test-Path -LiteralPath $asar)) {
-    throw 'app.asar was not found next to Setup. Please extract the whole zip first (right-click the zip > Extract All), then run Setup.cmd from the extracted folder.'
+    throw 'Some files are missing. Please extract the whole zip first (right-click InkleafPDF-Setup.zip > Extract All), then double-click "Install Inkleaf PDF" in the extracted folder.'
   }
 
   Get-Process -Name 'InkleafPDF' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -87,6 +96,7 @@ try {
   Copy-Item -LiteralPath $asar -Destination (Join-Path $dest 'resources\app.asar') -Force
   foreach ($f in @('icon.ico', 'Uninstall.cmd', 'README.txt')) {
     $src = Join-Path $here $f
+    if (-not (Test-Path -LiteralPath $src)) { $src = Join-Path $top $f }
     if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $dest $f) -Force }
   }
   $licSrc = Join-Path $here 'licenses'
@@ -142,9 +152,11 @@ try {
   Write-Host 'Tip: to open PDFs with it by default, right-click any PDF > Open with >'
   Write-Host '     Choose another app > Inkleaf PDF > Always.'
   if ($onWindows) { Start-Process -FilePath $exe }
+  Wait-IfStandalone
   exit 0
 } catch {
   Write-Host ''
   Write-Host ('Setup failed: ' + $_.Exception.Message) -ForegroundColor Red
+  Wait-IfStandalone
   exit 1
 }

@@ -2,18 +2,24 @@ INKLEAF PDF  -  fast touch & pen PDF reader for Windows
 =====================================================
 
 INSTALL
-  1. Right-click InkleafPDF-Setup.zip > "Extract All...".
-  2. Open the extracted folder and double-click  Setup.cmd
-     (If Windows asks whether to run it, choose "Run", or
-      "More info" > "Run anyway". The app isn't code-signed.)
+  1. Right-click InkleafPDF-Setup.zip > "Extract All..." > Extract.
+  2. In the folder that opens, double-click  Install Inkleaf PDF
+     (its full name is "Install Inkleaf PDF.cmd"; Windows usually hides
+      the ".cmd" ending). Leave the "files" folder next to it.
+     If Windows says "Windows protected your PC", click "More info"
+     > "Run anyway". The app isn't code-signed.
   3. Setup downloads the app runtime (about 160 MB) straight from
      Electron's official GitHub releases, checks its SHA-256 fingerprint,
      and installs everything to  %LOCALAPPDATA%\Programs\Inkleaf PDF.
      It takes a minute or two, then Inkleaf PDF opens by itself and is
      on your Start menu and Desktop. No admin rights are needed.
 
-  To update later, run the new Setup.cmd the same way. Your settings
-  and your PDFs are kept.
+  To update later, run the new "Install Inkleaf PDF" the same way.
+  Your settings and your PDFs are kept.
+
+  If "Install Inkleaf PDF" is missing (some antivirus or company
+  policies remove .cmd files), open the "files" folder, right-click
+  "setup" (setup.ps1) and choose "Run with PowerShell".
 
 FIRST RUN
   Click "Open folder" and pick the folder where your PDFs live.
