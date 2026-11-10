@@ -2,9 +2,16 @@
 // Several of these run in parallel: one "edit" worker owns annotations,
 // text and saving; the others only rasterize tiles.
 import * as mupdf from "./vendor/mupdf/mupdf.js";
+import { UNITS } from "./measure.js";
 
 const PDFAnnotation = mupdf.PDFAnnotation;
-const MANAGED_TYPES = new Set(["Ink", "Square", "Highlight"]);
+const MANAGED_TYPES = new Set(["Ink", "Square", "Highlight", "Line", "PolyLine", "Polygon"]);
+// Line/PolyLine/Polygon are only managed when Inkleaf created them as
+// measurements (marked with this key); anyone else's are left to MuPDF.
+const MEASURE_TYPES = new Set(["Line", "PolyLine", "Polygon"]);
+const MEASURE_KEY = "InkleafMeasure";
+const MEASURE_INTENT = { Line: "LineDimension", PolyLine: "PolyLineDimension", Polygon: "PolygonDimension" };
+const MEASURE_SUBJECT = { Line: "Length Measurement", PolyLine: "Length Measurement", Polygon: "Area Measurement" };
 const LIST_CACHE_SIZE = 6;
 
 let doc = null;
@@ -35,9 +42,22 @@ function entry(i) {
 
 // Annotations we draw ourselves as live vectors (so pen edits never force a
 // page re-render). Anything fancier is left to MuPDF to render faithfully.
+function measureInfo(a) {
+  try {
+    const v = a.getObject().get(MEASURE_KEY);
+    if (!v || !v.isString()) return null;
+    const info = JSON.parse(v.asString());
+    return info && typeof info === "object" ? info : null;
+  } catch {
+    return null;
+  }
+}
+
 function isManaged(a) {
   try {
-    if (!MANAGED_TYPES.has(a.getType())) return false;
+    const type = a.getType();
+    if (!MANAGED_TYPES.has(type)) return false;
+    if (MEASURE_TYPES.has(type) && !measureInfo(a)) return false;
     const f = a.getFlags();
     if (f & (PDFAnnotation.IS_HIDDEN | PDFAnnotation.IS_NO_VIEW | PDFAnnotation.IS_LOCKED | PDFAnnotation.IS_READ_ONLY)) return false;
     if (a.getObject().asIndirect() <= 0) return false;
@@ -126,8 +146,48 @@ function annotData(a) {
     d.fill = a.hasInteriorColor() ? colorOf(a.getInteriorColor()) : [];
   } else if (type === "Highlight") {
     d.quads = a.getQuadPoints().map((q) => Array.from(q));
+  } else if (MEASURE_TYPES.has(type)) {
+    const info = measureInfo(a) || {};
+    d.measure = true;
+    d.width = a.getBorderWidth();
+    d.pts = (type === "Line" ? a.getLine() : a.getVertices()).map((p) => [p[0], p[1]]);
+    d.contents = a.getContents() || "";
+    if (info.scale && info.scale.mPerPt > 0) d.scale = info.scale;
+    if (info.dp != null) d.dp = info.dp;
   }
   return d;
+}
+
+// Standard /Measure dictionary so Acrobat, Bluebeam etc. recognise the
+// annotation as a measurement at the same scale.
+function writeMeasure(a, data) {
+  const obj = a.getObject();
+  const sc = data.scale;
+  obj.put("IT", doc.newName(MEASURE_INTENT[data.type]));
+  obj.put("Subj", doc.newString(MEASURE_SUBJECT[data.type]));
+  obj.put(MEASURE_KEY, doc.newString(JSON.stringify({ v: 1, scale: sc, dp: data.dp ?? null })));
+  const u = sc && UNITS[sc.unit];
+  if (!u || !(sc.mPerPt > 0)) return;
+  const den = (dp) => Math.pow(10, Math.max(0, Math.min(6, data.dp ?? dp)));
+  const fmt = (label, factor, d) => {
+    const f = doc.newDictionary();
+    f.put("Type", doc.newName("NumberFormat"));
+    f.put("U", doc.newString(label));
+    f.put("C", doc.newReal(factor));
+    f.put("F", doc.newName("D"));
+    f.put("D", doc.newInteger(d));
+    const arr = doc.newArray();
+    arr.push(f);
+    return arr;
+  };
+  const m = doc.newDictionary();
+  m.put("Type", doc.newName("Measure"));
+  m.put("Subtype", doc.newName("RL"));
+  m.put("R", doc.newString(sc.label || ""));
+  m.put("X", fmt(u.label, sc.mPerPt / u.m, den(u.dp)));
+  m.put("D", fmt(u.label, 1, den(u.dp)));
+  m.put("A", fmt(u.area, Math.pow(u.m / (u.am || u.m), 2), den(u.adp)));
+  obj.put("Measure", m);
 }
 
 function findAnnot(page, id) {
@@ -205,6 +265,17 @@ const handlers = {
       if (data.fill && data.fill.length) a.setInteriorColor(data.fill);
     } else if (data.type === "Highlight") {
       a.setQuadPoints(data.quads);
+    } else if (MEASURE_TYPES.has(data.type)) {
+      a.setBorderWidth(data.width || 1);
+      if (data.type === "Line") {
+        a.setLine(data.pts[0], data.pts[1]);
+        try { a.setLineEndingStyles("Butt", "Butt"); } catch {}
+        try { a.setLineCaption(true); } catch {}
+      } else {
+        a.setVertices(data.pts);
+      }
+      a.setContents(data.contents || "");
+      writeMeasure(a, data);
     }
     a.update();
     return { result: a.getObject().asIndirect() };
@@ -232,6 +303,23 @@ const handlers = {
     }
     const copy = e.lines.slice();
     return { result: copy, transfer: [copy.buffer] };
+  },
+  // Text between two points (optionally snapped to whole words or lines):
+  // the quads to paint and the plain text to copy.
+  selectText({ page, p, q, mode }) {
+    const e = entry(page);
+    if (!e.stext) e.stext = e.page.toStructuredText("preserve-whitespace");
+    if (mode === "words" || mode === "lines") {
+      const h = e.stext.snap(p, q, mode);
+      let ux = h[2] - h[0], uy = h[3] - h[1];
+      const ul = Math.hypot(ux, uy) || 1;
+      ux = (ux / ul) * 0.05; uy = (uy / ul) * 0.05;
+      p = [(h[0] + h[4]) / 2 + ux, (h[1] + h[5]) / 2 + uy];
+      q = [(h[2] + h[6]) / 2 - ux, (h[3] + h[7]) / 2 - uy];
+    }
+    const quads = e.stext.highlight(p, q, 5000).map((qd) => Array.from(qd));
+    const text = quads.length ? e.stext.copy(p, q) : "";
+    return { result: { quads, text } };
   },
   highlight({ page, p, q }) {
     const e = entry(page);

@@ -1,7 +1,7 @@
 {
   "name": "inkleaf",
   "productName": "Inkleaf PDF",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Fast touch & pen PDF reader and annotator",
   "main": "electron/main.js",
   "private": true,

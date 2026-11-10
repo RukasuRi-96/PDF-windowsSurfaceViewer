@@ -1,0 +1,47 @@
+// Real Electron app: select + copy via the clipboard IPC, measure, save, relaunch.
+const { _electron: electron } = require('playwright');
+const OLD = process.env.WORK, SP = process.env.WORK, R = require('path').join(__dirname, '..');
+const MM = 72 / 25.4;
+(async () => {
+  const launch = () => electron.launch({ executablePath: R + '/node_modules/electron/dist/electron', args: ['--no-sandbox', R], env: { ...process.env, INKLEAF_USER_DATA: SP + '/ud' } });
+  const app = await launch();
+  const page = await app.firstWindow();
+  const logs = [];
+  page.on('console', m => { if (m.type() !== 'log') logs.push(`[${m.type()}] ${m.text()}`); });
+  page.on('pageerror', e => logs.push(`[pageerror] ${e.message}`));
+  await page.waitForSelector('.sb-row.file', { timeout: 15000 });
+  await page.click('text=Quarterly summary');
+  await page.waitForFunction(() => window.__inkleaf?.viewer.doc?.states.get(0)?.base, null, { timeout: 15000 });
+  console.log('has host.copyText:', await page.evaluate(() => typeof window.inkleaf.copyText));
+  await page.keyboard.press('v');
+  await page.waitForTimeout(300);
+  await page.keyboard.press('Control+a');
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Control+c');
+  await page.waitForTimeout(300);
+  const clip = await app.evaluate(({ clipboard }) => clipboard.readText());
+  const sel = await page.evaluate(() => window.__inkleaf.viewer.sel?.text || '');
+  console.log('system clipboard matches selection:', clip === sel && clip.length > 100, clip.length, JSON.stringify(clip.slice(0, 40)));
+  // measure on the drawing
+  await page.click('text=B1 services layout');
+  await page.waitForFunction(() => window.__inkleaf?.state.path?.includes('B1') && window.__inkleaf.viewer.doc?.states.get(0)?.base, null, { timeout: 15000 });
+  await page.evaluate(async () => { const m = await import('./measure.js'); await window.__inkleaf.setScale('all', m.ratioScale(50, 'mm')); });
+  await page.keyboard.press('r');
+  const C = (x, y) => page.evaluate(([x, y]) => { const v = window.__inkleaf.viewer; const [sx, sy] = v._screenOf(0, [x, y]); return [sx + v.rect.left, sy + v.rect.top]; }, [x, y]);
+  const A = await C(300, 300), B = await C(300 + 60 * MM, 300);
+  await page.mouse.move(A[0], A[1]); await page.mouse.down();
+  for (let k = 1; k <= 10; k++) await page.mouse.move(A[0] + (B[0] - A[0]) * k / 10, A[1]);
+  await page.mouse.up(); await page.waitForTimeout(200);
+  console.log('measurement:', await page.evaluate(() => window.__inkleaf.viewer.doc.annots.get(0).filter(a => a.measure).map(a => a.contents).join(', ')));
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !window.__inkleaf.viewer.dirty, null, { timeout: 10000 });
+  await page.screenshot({ path: SP + '/e3.png' });
+  await app.close();
+  const app2 = await launch();
+  const p2 = await app2.firstWindow();
+  await p2.waitForFunction(() => window.__inkleaf?.viewer.doc?.states.get(0)?.base, null, { timeout: 15000 });
+  await p2.waitForTimeout(500);
+  console.log('relaunch:', await p2.evaluate(() => window.__inkleaf.state.path.split('/').pop()), 'tool', await p2.evaluate(() => window.__inkleaf.viewer.tool), 'scale', await p2.evaluate(() => window.__inkleaf.scaleFor(0).label), 'measures', await p2.evaluate(() => (window.__inkleaf.viewer.doc.annots.get(0) || []).filter(a => a.measure).map(a => a.contents).join()));
+  await app2.close();
+  console.log(logs.length ? logs.join('\n') : 'no errors');
+})().catch(e => { console.error('FAIL', e); process.exit(1); });

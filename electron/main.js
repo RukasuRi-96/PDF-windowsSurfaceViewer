@@ -1,5 +1,5 @@
 // Inkleaf PDF — Electron main process.
-const { app, BrowserWindow, ipcMain, dialog, protocol, shell, nativeTheme, Menu, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, protocol, shell, nativeTheme, Menu, screen, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -160,6 +160,7 @@ ipcMain.handle("read-json", (_e, name) => readJsonSync(name));
 ipcMain.handle("write-json", (_e, name, value) => writeJson(name, value));
 ipcMain.handle("show-in-folder", (_e, p) => { if (p) shell.showItemInFolder(p); });
 ipcMain.handle("toggle-fullscreen", () => { if (win) win.setFullScreen(!win.isFullScreen()); });
+ipcMain.handle("copy-text", (_e, text) => { clipboard.writeText(String(text ?? "")); return true; });
 ipcMain.handle("watch-folder", (_e, dir) => {
   try { watcher?.close(); } catch {}
   watcher = null;

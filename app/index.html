@@ -16,11 +16,13 @@
     </div>
     <div class="tb-group tb-tools" role="toolbar" aria-label="Tools">
       <div class="seg" id="tools">
+        <button class="btn icon-btn tool" data-tool="select" title="Select text (V) — drag over text to select and copy; drag on blank paper to pan"></button>
         <button class="btn icon-btn tool" data-tool="hand" title="Pan (H)"></button>
         <button class="btn icon-btn tool" data-tool="highlight" title="Highlight (M)"></button>
         <button class="btn icon-btn tool" data-tool="pen" title="Pen (P)"></button>
         <button class="btn icon-btn tool" data-tool="box" title="Box (B)"></button>
         <button class="btn icon-btn tool" data-tool="eraser" title="Eraser (E)"></button>
+        <button class="btn icon-btn tool" data-tool="measure" title="Measure distance, path length and area (R)"></button>
       </div>
       <button class="btn icon-btn" id="btn-style" title="Color and size"><span class="swatch-dot"></span></button>
       <button class="btn icon-btn" id="btn-touch" title="Finger draws (T). Off: finger pans and zooms, pen draws."></button>
@@ -54,12 +56,20 @@
           <ul class="tips">
             <li><b>Finger</b> — drag to pan, pinch to zoom, double-tap to zoom</li>
             <li><b>Pen</b> — writes with the selected tool; flip it over to erase</li>
+            <li><b>Mouse</b> — drag over text to copy it, middle-drag to pan</li>
             <li><b>Ctrl+S</b> saves annotations straight into the PDF</li>
           </ul>
         </div>
       </div>
       <div id="loading"><div class="spinner"></div></div>
       <div id="pagepill" role="button" title="Go to page">–</div>
+      <div id="measurebar">
+        <button class="btn mb-scale" id="mb-scale" title="Drawing scale — click to change or calibrate"></button>
+        <span id="mb-text"></span>
+        <button class="btn icon-btn" id="mb-back" title="Remove last point (Backspace)" hidden></button>
+        <button class="btn primary" id="mb-done" title="Finish (Enter or double-click)" hidden></button>
+        <button class="btn icon-btn" id="mb-cancel" title="Cancel (Esc)"></button>
+      </div>
       <div id="toasts"></div>
     </section>
   </div>

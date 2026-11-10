@@ -157,5 +157,6 @@ export class Engine {
   }
   textLines(page) { return this.edit.call("textLines", { page }); }
   highlight(page, p, q) { return this.edit.call("highlight", { page, p, q }); }
+  selectText(page, p, q, mode = "chars") { return this.edit.call("selectText", { page, p, q, mode }); }
   save(mode = "incremental") { return this._edit(() => this.edit.call("save", { mode })); }
 }

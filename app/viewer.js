@@ -1,6 +1,8 @@
 // Inkleaf viewer: continuous page layout, compositor-driven pan/zoom,
 // tiled rendering, touch + pen gestures, and live vector annotations.
 
+import { measureText, MODE_TYPES, DEFAULT_SCALE, pathLength, polyCentroid, sameScale } from "./measure.js";
+
 const SVGNS = "http://www.w3.org/2000/svg";
 const TILE = 512;              // device pixels per tile edge
 const BASE_PIXELS = 1.3e6;     // budget for the quick whole-page preview
@@ -88,7 +90,9 @@ function smooth(pts) {
   return out;
 }
 
-const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser"]);
+// Tools a finger uses when "finger draws" is on (otherwise a finger pans).
+const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure"]);
+const round2 = (v) => Math.round(v * 100) / 100;
 
 export class Viewer {
   constructor(root, engine, callbacks = {}) {
@@ -103,6 +107,16 @@ export class Viewer {
     this.vthumb = el("div", "thumb", this.vbar);
     this.hbar = el("div", "scrollbar h", root);
     this.hthumb = el("div", "thumb", this.hbar);
+    this.selBar = el("div", "selbar", root);
+    this.selBar.hidden = true;
+    this.selBar.innerHTML = `<button class="btn" data-act="copy">Copy</button><button class="btn" data-act="highlight">Highlight</button>`;
+    this.selBar.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.selBar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (!b || !this.sel) return;
+      if (b.dataset.act === "copy") this.cb.onCopy?.(this.sel.text);
+      else if (b.dataset.act === "highlight") this.highlightSelection();
+    });
 
     this.doc = null;
     this.scale = 1;
@@ -117,6 +131,11 @@ export class Viewer {
       box: { color: [0.86, 0.15, 0.15], width: 2 },
     };
     this.touchDraws = false;
+    this.wheelZooms = false;     // plain mouse wheel zooms instead of scrolling
+    this.measureMode = "distance";
+    this.measureStyle = { color: [0.92, 0.35, 0.05], dp: null };
+    this.mdraft = null;          // measurement being drawn
+    this.sel = null;             // current text selection
     this.pointers = new Map();
     this.action = null;
     this.lastPen = -1e9;
@@ -138,6 +157,9 @@ export class Viewer {
     root.addEventListener("lostpointercapture", (e) => { if (this.pointers.has(e.pointerId)) this._up(e, true); });
     root.addEventListener("wheel", (e) => this._wheel(e), { passive: false });
     root.addEventListener("contextmenu", (e) => e.preventDefault());
+    // Middle button is ours (drag to pan): no autoscroll or paste.
+    root.addEventListener("mousedown", (e) => { if (e.button === 1) e.preventDefault(); });
+    root.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
     this._setupScrollbars();
 
     if (navigator.ink && navigator.ink.requestPresenter) {
@@ -154,7 +176,7 @@ export class Viewer {
       states: new Map(),
       attached: new Set(),
       annots: new Map(),
-      annotsLoading: new Set(),
+      annotsP: new Map(),
       text: new Map(),
       undo: [], redo: [], seq: 0, savedSeq: 0,
     };
@@ -176,6 +198,14 @@ export class Viewer {
   close() {
     this._stopInertia();
     this.action = null;
+    this.root.classList.remove("panning", "over-text");
+    this.sel = null;
+    this._selPages = null;
+    this.selBar.hidden = true;
+    const hadDraft = this.mdraft || this._calibrating;
+    this.mdraft = null;
+    this._calibrating = false;
+    if (hadDraft) this._measureChanged();
     this.pointers.clear();
     this.zt = null;
     this._clearLive();
@@ -270,6 +300,8 @@ export class Viewer {
       y = L.top[i] + L.H[i] + GAP;
     }
     L.worldH = y - GAP + PAD;
+    // Measurement labels and handles stay the same size on screen at any zoom.
+    this.world.style.setProperty("--ms", String(1 / this.scale));
     this.world.style.width = L.worldW + "px";
     this.world.style.height = L.worldH + "px";
   }
@@ -339,6 +371,7 @@ export class Viewer {
     if (this.zt) {
       const { a, bx, by } = this.zt;
       this.world.style.transform = `translate(${bx}px,${by}px) scale(${a}) translate(${tx}px,${ty}px)`;
+      this.selBar.hidden = true;
     } else {
       this.world.style.transform = `translate(${tx}px,${ty}px)`;
     }
@@ -349,6 +382,11 @@ export class Viewer {
     this._applyTransform();
     this._syncPages();
     this._updateScrollbars();
+    this._placeSelBar();
+    if (this.tool === "select" || this.tool === "highlight") {
+      const [a, b] = this._visibleRange(0);
+      for (let i = a; i <= b; i++) if (!this.doc.text.has(i)) this._loadText(i);
+    }
     const cur = this.currentPage();
     if (cur !== this._lastPage) {
       this._lastPage = cur;
@@ -417,8 +455,11 @@ export class Viewer {
     const vb = `${p.x0} ${p.y0} ${p.w} ${p.h}`;
     s.svgHl = svgEl("svg", { class: "annots hl", viewBox: vb, preserveAspectRatio: "none" }, s.el);
     s.svgInk = svgEl("svg", { class: "annots ink", viewBox: vb, preserveAspectRatio: "none" }, s.el);
+    s.svgSel = svgEl("svg", { class: "annots sel", viewBox: vb, preserveAspectRatio: "none" }, s.el);
+    s.svgMeas = svgEl("svg", { class: "annots meas", viewBox: vb, preserveAspectRatio: "none" }, s.el);
     s.prevHl = svgEl("g", {}, s.svgHl);
     s.prevInk = svgEl("g", {}, s.svgInk);
+    s.prevMeas = svgEl("g", {}, s.svgMeas);
     d.states.set(i, s);
     this._loadAnnots(i);
     return s;
@@ -513,9 +554,13 @@ export class Viewer {
     if (!this.doc) return;
     this._stopInertia();
     const px = e.clientX - this.rect.left, py = e.clientY - this.rect.top;
-    if (e.ctrlKey || e.metaKey) {
+    let dx = e.deltaX, dy = e.deltaY;
+    // Ctrl/⌘+wheel (and touchpad pinch) always zooms. When the wheel is set to
+    // zoom, a plain vertical wheel zooms too and Shift+wheel scrolls instead.
+    const zoom = e.ctrlKey || e.metaKey || (this.wheelZooms && !e.shiftKey && Math.abs(dy) >= Math.abs(dx));
+    if (zoom) {
       const unit = e.deltaMode === 1 ? 0.05 : e.deltaMode === 2 ? 0.5 : 0.0025;
-      const f = Math.exp(-e.deltaY * unit);
+      const f = Math.exp(-dy * unit);
       const zt = this.zt || { a: 1, bx: 0, by: 0 };
       const a = clamp(zt.a * f, MIN_SCALE / this.scale, MAX_SCALE / this.scale);
       const g = a / zt.a;
@@ -525,10 +570,13 @@ export class Viewer {
       return;
     }
     if (this.zt) this._ztCommit(px, py);
-    let dx = e.deltaX, dy = e.deltaY;
     if (e.deltaMode === 1) { dx *= 40; dy *= 40; }
     else if (e.deltaMode === 2) { dx *= this.vw; dy *= this.vh; }
-    if (e.shiftKey && !dx) { dx = dy; dy = 0; }
+    if (e.shiftKey) {
+      // Windows may already have turned Shift+wheel into a sideways delta.
+      if (this.wheelZooms) { if (!dy) { dy = dx; dx = 0; } }
+      else if (!dx) { dx = dy; dy = 0; }
+    }
     this.scrollBy(dx, dy);
   }
 
@@ -794,9 +842,14 @@ export class Viewer {
 
   // ------------------------------------------------------------ input
   setTool(tool) {
+    if (tool !== this.tool) {
+      if (this.mdraft || this._calibrating) this.cancelMeasure();
+      if (this.sel && tool !== "select") this.clearSelection();
+    }
     this.tool = tool;
     this.root.dataset.tool = tool;
-    if (tool === "highlight" && this.doc) {
+    this.root.classList.remove("over-text");
+    if ((tool === "highlight" || tool === "select") && this.doc) {
       const [a, b] = this._visibleRange(0);
       for (let i = a; i <= b; i++) this._loadText(i);
     }
@@ -857,14 +910,17 @@ export class Viewer {
       if (this.tool === "hand" || !this._startTool(e, ptr, false)) this._startPan(ptr, true);
       return;
     }
-    // mouse (dragging in the margins pans, whatever the tool)
-    if (e.button === 1 || this.tool === "hand" || !this._startTool(e, ptr, false)) this._startPan(ptr, false);
+    // mouse: the middle button always pans; so does dragging in the margins,
+    // whatever the tool.
+    if (e.button === 1) { this._startPan(ptr, false); return; }
+    if (this.tool === "hand" || !this._startTool(e, ptr, false)) this._startPan(ptr, false);
   }
 
   _move(e) {
     if (e.pointerType === "pen") this.lastPen = now();
     const ptr = this.pointers.get(e.pointerId);
-    if (!ptr || ptr.ignored) return;
+    if (!ptr) { this._hover(e); return; }
+    if (ptr.ignored) return;
     ptr.x = e.clientX;
     ptr.y = e.clientY;
     const a = this.action;
@@ -877,6 +933,23 @@ export class Viewer {
       case "highlight": this._moveHighlight(a, e); break;
       case "box": this._moveBox(a, e); break;
       case "erase": this._moveErase(a, e); break;
+      case "select": this._moveSelect(a, e); break;
+      case "measure": this._measureMove(a, e); break;
+    }
+  }
+
+  // Mouse/pen moving without a button pressed.
+  _hover(e) {
+    if (!this.doc || this.action) return;
+    if (this.tool === "measure" && this.mdraft && e.pointerType !== "touch") {
+      const d = this.mdraft;
+      const p = this._clampToPage(d.page, this._clientToPage(d.page, e.clientX, e.clientY));
+      d.hover = this._constrainPt(d, p, e.shiftKey);
+      this._drawDraft();
+    } else if (this.tool === "select" && e.pointerType === "mouse") {
+      const [wx, wy] = this._toWorld(e.clientX, e.clientY);
+      const i = this._hitPage(wx, wy, 0);
+      this.root.classList.toggle("over-text", i >= 0 && this._selectableAt(i, this._worldToPage(i, wx, wy)) === true);
     }
   }
 
@@ -901,6 +974,7 @@ export class Viewer {
     if (a.pid !== e.pointerId) return;
     if (a.kind === "pan") {
       this.action = null;
+      this.root.classList.remove("panning");
       this._endPan(a, ptr, cancelled);
       return;
     }
@@ -910,18 +984,22 @@ export class Viewer {
   _endAction(cancel) {
     const a = this.action;
     this.action = null;
+    this.root.classList.remove("panning");
     if (!a) return;
     switch (a.kind) {
       case "ink": this._finishInk(a, cancel); break;
       case "highlight": this._finishHighlight(a, cancel); break;
       case "box": this._finishBox(a, cancel); break;
       case "erase": this._finishErase(a, cancel); break;
+      case "select": this._finishSelect(a, cancel); break;
+      case "measure": this._measureUp(a, cancel); break;
       case "pinch": this._ztCommit(this.vw / 2, this.vh / 2); break;
     }
   }
 
   // ---- pan
   _startPan(ptr, inertia, resumed = false) {
+    if (ptr.type === "mouse") this.root.classList.add("panning");
     this.action = { kind: "pan", pid: ptr.id, touch: ptr.type === "touch", t0: now(), lx: ptr.x, ly: ptr.y, samples: [[now(), ptr.x, ptr.y]], inertia, resumed };
   }
 
@@ -941,6 +1019,8 @@ export class Viewer {
       this._tap(ptr);
       return;
     }
+    // A click in empty space drops the text selection.
+    if (!cancelled && !a.resumed && moved < 5 && this.sel) this.clearSelection();
     if (cancelled || !a.inertia) return;
     const s = a.samples;
     if (s.length < 2) return;
@@ -959,6 +1039,9 @@ export class Viewer {
   }
 
   _tap(ptr) {
+    // Measuring with a finger: tap to place points, drag to pan.
+    if (this.tool === "measure" && this._measureTap(ptr)) { this.lastTap = null; return; }
+    if (this.sel) this.clearSelection();
     const t = now();
     const lt = this.lastTap;
     if (lt && t - lt.t < 320 && Math.hypot(ptr.x - lt.x, ptr.y - lt.y) < 40) {
@@ -985,6 +1068,7 @@ export class Viewer {
   }
 
   _startPinch() {
+    this.root.classList.remove("panning");
     const [p, q] = this._pinchPointers();
     const c = [(p.x + q.x) / 2 - this.rect.left, (p.y + q.y) / 2 - this.rect.top];
     const d = Math.max(10, Math.hypot(p.x - q.x, p.y - q.y));
@@ -1020,6 +1104,8 @@ export class Viewer {
 
   _startTool(e, ptr, touch) {
     if (this.tool === "eraser") { this._startErase(e, ptr, touch); return true; }
+    if (this.tool === "select") return this._startSelect(e, ptr, touch);
+    if (this.tool === "measure") return this._measureDown(e, ptr, touch);
     const i = this._pageForPointer(e);
     if (i < 0) return false;
     const p = this._clampToPage(i, this._clientToPage(i, e.clientX, e.clientY));
@@ -1319,6 +1405,16 @@ export class Viewer {
 
   _hitAnnot(d, p, tol) {
     const [x, y] = p;
+    if (d.measure) {
+      const pts = d.pts, r = tol + 2 / this.scale;
+      const closed = d.type === "Polygon";
+      if (closed && pointInPoly(x, y, pts)) return true;
+      for (let k = 1; k < pts.length + (closed ? 1 : 0); k++) {
+        const a = pts[k - 1], b = pts[k % pts.length];
+        if (distSeg(x, y, a[0], a[1], b[0], b[1]) <= r) return true;
+      }
+      return false;
+    }
     if (d.type === "Ink") {
       const r = tol + (d.width || 1) / 2;
       for (const s of d.ink) {
@@ -1354,18 +1450,436 @@ export class Viewer {
     if (a.removed.length) this._pushHistory(a.removed);
   }
 
+  // ------------------------------------------------------------ text selection
+  // A drag that starts on (or right next to) text selects it; one that starts
+  // on blank paper pans instead, so the select tool doubles as a hand tool.
+  _selectableAt(i, p) {
+    const lines = this.doc.text.get(i);
+    if (!(lines instanceof Float32Array)) return null; // not loaded yet
+    return !!this._snapText(i, p, Math.max(3, 12 / this.scale));
+  }
+
+  _startSelect(e, ptr, touch) {
+    const i = this._pageForPointer(e);
+    if (i < 0) return false;
+    const p = this._clampToPage(i, this._clientToPage(i, e.clientX, e.clientY));
+    const t = now(), lc = this._lastClick;
+    let clicks = 1;
+    if (lc && t - lc.t < 450 && Math.hypot(e.clientX - lc.x, e.clientY - lc.y) < (touch ? 24 : 6)) clicks = lc.n >= 3 ? 1 : lc.n + 1;
+    const extend = e.shiftKey && this.sel && clicks === 1;
+    if (clicks === 1 && !extend && this._selectableAt(i, p) === false) { this._lastClick = null; return false; }
+    this._loadText(i);
+    this._lastClick = { t, x: e.clientX, y: e.clientY, n: clicks };
+    const mode = clicks === 2 ? "words" : clicks === 3 ? "lines" : extend ? this.sel.mode : "chars";
+    if (!extend && clicks === 1) this.clearSelection();
+    const a = (this.action = {
+      kind: "select", pid: ptr.id, touch, t0: t, x0: e.clientX, y0: e.clientY, lx: e.clientX, ly: e.clientY,
+      anchor: extend ? this.sel.anchor : { page: i, p }, focus: { page: i, p }, mode, active: clicks > 1 || extend, seq: 0,
+    });
+    if (a.active) this._querySelection(a);
+    return true;
+  }
+
+  _moveSelect(a, e) {
+    a.lx = e.clientX;
+    a.ly = e.clientY;
+    if (!a.active && Math.hypot(e.clientX - a.x0, e.clientY - a.y0) < 4) return;
+    a.active = true;
+    this._selectTo(a);
+    this._edgeScroll(a);
+  }
+
+  _selectTo(a) {
+    const [wx, wy] = this._toWorld(a.lx, a.ly);
+    let i = this._hitPage(wx, wy, 0);
+    if (i < 0) i = clamp(this._pageAtY(wy), 0, this.doc.pages.length - 1);
+    a.focus = { page: i, p: this._clampToPage(i, this._worldToPage(i, wx, wy)) };
+    this._querySelection(a);
+  }
+
+  // Scroll while dragging a selection near the edge of the view.
+  _edgeScroll(a) {
+    const E = 36, x = a.lx - this.rect.left, y = a.ly - this.rect.top;
+    const v = (c, n) => (c < E ? -(E - c) : c > n - E ? c - (n - E) : 0) * 0.5;
+    a.ev = [v(x, this.vw), v(y, this.vh)];
+    if ((a.ev[0] || a.ev[1]) && !a.raf) {
+      const step = () => {
+        if (this.action !== a || (!a.ev[0] && !a.ev[1])) { a.raf = 0; return; }
+        this.scrollBy(a.ev[0], a.ev[1]);
+        this._selectTo(a);
+        a.raf = requestAnimationFrame(step);
+      };
+      a.raf = requestAnimationFrame(step);
+    }
+  }
+
+  // [page, from, to] for each page the selection touches.
+  _selParts(anchor, focus) {
+    let A = anchor, B = focus;
+    if (B.page < A.page) [A, B] = [B, A];
+    if (A.page === B.page) return [[A.page, A.p, B.p]];
+    const P = this.doc.pages, out = [[A.page, A.p, [P[A.page].x1, P[A.page].y1]]];
+    for (let k = A.page + 1; k < B.page && out.length < 60; k++) out.push([k, [P[k].x0, P[k].y0], [P[k].x1, P[k].y1]]);
+    out.push([B.page, [P[B.page].x0, P[B.page].y0], B.p]);
+    return out;
+  }
+
+  _querySelection(a) {
+    if (a.querying) { a.dirty = true; return; }
+    a.querying = true;
+    a.dirty = false;
+    const seq = ++a.seq, doc = this.doc;
+    const parts = this._selParts(a.anchor, a.focus);
+    Promise.all(parts.map(([k, p, q]) => this.engine.selectText(k, p, q, a.mode).then((r) => ({ page: k, ...r }))))
+      .then((res) => {
+        a.querying = false;
+        if (this.doc !== doc || seq !== a.seq) return;
+        if (a.dirty) { this._querySelection(a); return; }
+        if (this.action !== a && !a.ended) return; // replaced by another gesture
+        const kept = res.filter((r) => r.quads.length);
+        this._setSelection(kept.length ? { anchor: a.anchor, focus: a.focus, mode: a.mode, parts: kept } : null);
+      })
+      .catch((err) => { a.querying = false; console.warn("select", err); });
+  }
+
+  _finishSelect(a, cancel) {
+    if (a.raf) cancelAnimationFrame(a.raf);
+    a.raf = 0;
+    a.ended = true;
+    if (cancel || !a.active) { this.clearSelection(); return; }
+    this._placeSelBar();
+  }
+
+  _setSelection(sel) {
+    if (sel) sel.text = sel.parts.map((r) => r.text.replace(/\s+$/, "")).join("\n");
+    this.sel = sel;
+    this._drawSelection();
+    this._placeSelBar();
+    this.cb.onSelection?.(sel ? sel.text : "");
+  }
+
+  _drawSelection() {
+    const d = this.doc;
+    for (const i of this._selPages || []) { const s = d?.states.get(i); if (s) s.svgSel.textContent = ""; }
+    this._selPages = new Set();
+    if (!this.sel || !d) return;
+    for (const part of this.sel.parts) {
+      const s = this._state(part.page);
+      svgEl("path", { d: part.quads.map((q) => "M" + quadPoly(q).map((p) => p.join(" ")).join("L") + "Z").join("") }, s.svgSel);
+      this._selPages.add(part.page);
+    }
+  }
+
+  _placeSelBar() {
+    const b = this.selBar, sel = this.sel;
+    if (!sel || !sel.parts.length || this.zt || this.action?.kind === "select") { b.hidden = true; return; }
+    const last = sel.parts[sel.parts.length - 1], q = last.quads[last.quads.length - 1];
+    const first = sel.parts[0], q0 = first.quads[0];
+    const [x1, y1] = this._screenOf(last.page, [Math.max(q[4], q[6]), Math.max(q[5], q[7])]);
+    const [, y0] = this._screenOf(first.page, [q0[0], Math.min(q0[1], q0[3])]);
+    if (y1 < 0 || y0 > this.vh) { b.hidden = true; return; }
+    b.hidden = false;
+    const w = b.offsetWidth, h = b.offsetHeight;
+    let top = y1 + 10;
+    if (top + h > this.vh - 8) top = y0 - h - 10;
+    top = clamp(top, 8, this.vh - h - 8);
+    b.style.transform = `translate(${Math.round(clamp(x1 - w / 2, 8, this.vw - w - 8))}px,${Math.round(top)}px)`;
+  }
+
+  get hasSelection() { return !!this.sel; }
+
+  clearSelection() {
+    if (!this.sel && !this._selPages?.size) return;
+    this.sel = null;
+    this._drawSelection();
+    this.selBar.hidden = true;
+    this.cb.onSelection?.("");
+  }
+
+  selectAllOnPage(i = this.currentPage()) {
+    if (!this.doc) return;
+    const p = this.doc.pages[i];
+    const a = { anchor: { page: i, p: [p.x0, p.y0] }, focus: { page: i, p: [p.x1, p.y1] }, mode: "chars", ended: true, seq: 0 };
+    this._querySelection(a);
+  }
+
+  // Turn the selection into highlight annotations (one undo step).
+  highlightSelection() {
+    if (!this.sel || !this.doc) return;
+    const ops = [];
+    for (const part of this.sel.parts) {
+      const d = { type: "Highlight", color: this.styles.highlight.color.slice(), opacity: 1, quads: part.quads.map((q) => q.map(round2)) };
+      this._insertAnnot(part.page, d);
+      ops.push({ op: "add", page: part.page, data: d });
+    }
+    this.clearSelection();
+    if (ops.length) this._pushHistory(ops);
+  }
+
+  // ------------------------------------------------------------ measuring
+  // Distance: drag, or click two points. Path/area: click (or tap) each
+  // point; double-click, Enter or "Done" finishes, clicking the first point
+  // closes an area. Shift snaps to 45°. Middle-drag / finger-drag still pan.
+  _screenDist(i, p, q) {
+    return Math.hypot(p[0] - q[0], p[1] - q[1]) * this.scale;
+  }
+
+  _constrainPt(d, p, shift, idx = d.pts.length) {
+    const prev = d.pts[idx - 1];
+    if (!shift || !prev) return p;
+    const dx = p[0] - prev[0], dy = p[1] - prev[1], step = Math.PI / 4;
+    const ang = Math.round(Math.atan2(dy, dx) / step) * step;
+    const len = dx * Math.cos(ang) + dy * Math.sin(ang); // project onto the snapped direction
+    return this._clampToPage(d.page, [prev[0] + len * Math.cos(ang), prev[1] + len * Math.sin(ang)]);
+  }
+
+  _measureDown(e, ptr, touch) {
+    const t = now();
+    let d = this.mdraft;
+    const i = d ? d.page : this._pageForPointer(e);
+    if (i < 0) return false;
+    if (!d) d = this.mdraft = { page: i, mode: this._calibrating ? "calibrate" : this.measureMode, pts: [], hover: null };
+    const p = this._constrainPt(d, this._clampToPage(i, this._clientToPage(i, e.clientX, e.clientY)), e.shiftKey);
+    const a = (this.action = { kind: "measure", pid: ptr.id, touch, t0: t, x0: e.clientX, y0: e.clientY, moved: false, idx: -1, finish: false });
+    const lc = this._mClick;
+    this._mClick = { t, x: e.clientX, y: e.clientY };
+    if (d.mode === "path" || d.mode === "area") {
+      const need = d.mode === "area" ? 3 : 2;
+      if (d.mode === "area" && d.pts.length >= 3 && this._screenDist(i, p, d.pts[0]) < (touch ? 24 : 12)) { a.finish = true; return true; }
+      if (lc && t - lc.t < 400 && Math.hypot(e.clientX - lc.x, e.clientY - lc.y) < (touch ? 24 : 10) && d.pts.length >= need) { a.finish = true; return true; }
+    }
+    d.pts.push(p);
+    a.idx = d.pts.length - 1;
+    d.hover = null;
+    this._drawDraft();
+    return true;
+  }
+
+  _measureMove(a, e) {
+    const d = this.mdraft;
+    if (!d || a.idx < 0) return;
+    if (!a.moved && Math.hypot(e.clientX - a.x0, e.clientY - a.y0) > 6) a.moved = true;
+    if (!a.moved) return;
+    const p = this._clampToPage(d.page, this._clientToPage(d.page, e.clientX, e.clientY));
+    // Distance: press, drag and release draws the whole line.
+    if ((d.mode === "distance" || d.mode === "calibrate") && d.pts.length === 1 && a.idx === 0) { d.pts.push(p); a.idx = 1; }
+    d.pts[a.idx] = this._constrainPt(d, p, e.shiftKey, a.idx);
+    this._drawDraft();
+  }
+
+  _measureUp(a, cancel) {
+    const d = this.mdraft;
+    if (!d || cancel) return;
+    if (a.finish) { this.finishMeasure(); return; }
+    if ((d.mode === "distance" || d.mode === "calibrate") && d.pts.length >= 2) {
+      // Second point on top of the first: wait for a real second point.
+      if (this._screenDist(d.page, d.pts[0], d.pts[1]) < 6) { d.pts.length = 1; this._drawDraft(); return; }
+      this.finishMeasure();
+    }
+  }
+
+  _measureTap(ptr) {
+    const fake = { clientX: ptr.x, clientY: ptr.y, shiftKey: false };
+    if (!this._measureDown(fake, ptr, true)) return false;
+    const a = this.action;
+    this.action = null;
+    this._measureUp(a, false);
+    return true;
+  }
+
+  _drawDraft() {
+    if (this._draftRaf) return;
+    this._draftRaf = requestAnimationFrame(() => {
+      this._draftRaf = 0;
+      const d = this.mdraft;
+      for (const s of this.doc ? this.doc.states.values() : []) if (s.prevMeas.firstChild && (!d || s.i !== d.page)) s.prevMeas.textContent = "";
+      if (d && this.doc) {
+        const s = this._state(d.page);
+        s.prevMeas.textContent = "";
+        const pts = d.hover ? d.pts.concat([d.hover]) : d.pts;
+        const type = MODE_TYPES[d.mode];
+        const hint = d.mode === "area" && d.hover && d.pts.length >= 3 && this._screenDist(d.page, d.hover, d.pts[0]) < 12;
+        s.prevMeas.appendChild(this._measureGroup(type, pts, cssColor(this.measureStyle.color), this._draftLabel(d, pts), true, hint));
+      }
+      this._measureChanged();
+    });
+  }
+
+  _draftLabel(d, pts) {
+    const type = MODE_TYPES[d.mode];
+    if (pts.length < (type === "Polygon" ? 3 : 2)) return null;
+    return measureText(type, pts, this.cb.scaleFor?.(d.page) || DEFAULT_SCALE, this.measureStyle.dp);
+  }
+
+  // Live state for the measuring bar.
+  measureStatus() {
+    const d = this.mdraft;
+    const mode = d ? d.mode : this._calibrating ? "calibrate" : this.measureMode;
+    const st = { mode, drafting: !!d, points: d ? d.pts.length : 0, value: "", canFinish: false, page: d ? d.page : this.currentPage() };
+    if (d) {
+      const pts = d.hover ? d.pts.concat([d.hover]) : d.pts;
+      const lbl = this._draftLabel(d, pts);
+      if (lbl) st.value = lbl.main + (lbl.sub ? " · " + lbl.sub : "");
+      st.canFinish = d.pts.length >= (d.mode === "area" ? 3 : 2);
+    }
+    return st;
+  }
+
+  _measureChanged() {
+    this.cb.onMeasure?.(this.measureStatus());
+  }
+
+  setMeasureMode(mode) {
+    this.cancelMeasure();
+    this.measureMode = mode;
+    this._measureChanged();
+  }
+
+  setMeasureStyle(style) {
+    Object.assign(this.measureStyle, style);
+    if (this.mdraft) this._drawDraft();
+    else this._measureChanged();
+  }
+
+  // Next line drawn sets the scale (see cb.onCalibrate).
+  startCalibrate() {
+    this.cancelMeasure();
+    this._calibrating = true;
+    this._measureChanged();
+  }
+
+  cancelMeasure() {
+    this.mdraft = null;
+    this._calibrating = false;
+    this._mClick = null;
+    this._drawDraft();
+  }
+
+  // Remove the last point placed (Backspace).
+  measureBack() {
+    const d = this.mdraft;
+    if (!d) return;
+    d.pts.pop();
+    if (!d.pts.length) { this.cancelMeasure(); return; }
+    this._drawDraft();
+  }
+
+  finishMeasure() {
+    const d = this.mdraft;
+    if (!d) return false;
+    this.mdraft = null;
+    this._mClick = null;
+    const type = MODE_TYPES[d.mode];
+    let pts = d.pts.map((p) => p.map(round2));
+    if (type === "Line") pts = pts.slice(0, 2);
+    const ok = pts.length >= (type === "Polygon" ? 3 : 2) && pathLength(pts) * this.scale >= 3;
+    if (d.mode === "calibrate") {
+      this._calibrating = false;
+      this._drawDraft();
+      if (ok) this.cb.onCalibrate?.(d.page, pathLength(pts));
+      return ok;
+    }
+    if (ok) {
+      const sc = this.cb.scaleFor?.(d.page) || DEFAULT_SCALE;
+      const dp = this.measureStyle.dp;
+      const scale = { mPerPt: sc.mPerPt, unit: sc.unit, label: sc.label };
+      this._commitAdd(d.page, { type, measure: true, pts, color: this.measureStyle.color.slice(), opacity: 1, width: 1, scale, dp, contents: measureText(type, pts, scale, dp).contents });
+    }
+    this._drawDraft();
+    return ok;
+  }
+
+  _measureLabel(d) {
+    if (d.scale) return measureText(d.type, d.pts, d.scale, d.dp);
+    const lines = (d.contents || "").split(/\r?\n/);
+    return { main: lines[0].replace(/^(Area|Length)\s+/i, ""), sub: lines[1] || "" };
+  }
+
+  // SVG (page coordinates) for one measurement. Labels, ticks and handles
+  // are scaled by --ms so they stay the same size on screen.
+  _measureGroup(type, pts, color, label, draft, closeHint = false) {
+    const g = svgEl("g", { class: "measure" + (draft ? " draft" : "") });
+    g.style.setProperty("--mc", color);
+    const P = (p) => p[0] + " " + p[1];
+    const closed = type === "Polygon" && pts.length >= 3;
+    if (pts.length >= 2) svgEl("path", { class: closed ? "m-area" : "m-line", d: "M" + pts.map(P).join("L") + (closed ? "Z" : "") }, g);
+    if (type === "Line" && pts.length >= 2) {
+      const [a, b] = pts;
+      const ang = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+      for (const p of [a, b]) svgEl("line", { class: "m-tick", x1: 0, y1: -7, x2: 0, y2: 7 }, svgEl("g", { transform: `translate(${P(p)}) rotate(${ang})` }, g));
+    } else {
+      pts.forEach((p, k) => svgEl("circle", { class: "m-dot" + (k === 0 && closeHint ? " snap" : ""), cx: p[0], cy: p[1] }, g));
+    }
+    if (label && label.main) {
+      let at, ang = 0;
+      if (closed) at = polyCentroid(pts);
+      else {
+        let k = 1, best = -1;
+        for (let j = 1; j < pts.length; j++) {
+          const l = Math.hypot(pts[j][0] - pts[j - 1][0], pts[j][1] - pts[j - 1][1]);
+          if (l > best) { best = l; k = j; }
+        }
+        const a = pts[k - 1], b = pts[k];
+        at = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        ang = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+        if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+      }
+      const lg = svgEl("g", { class: "m-lbl" }, svgEl("g", { transform: `translate(${P(at)}) rotate(${ang})` }, g));
+      const t = svgEl("text", { x: 0, y: closed ? (label.sub ? -3 : 5) : -8, "text-anchor": "middle" }, lg);
+      t.textContent = label.main;
+      if (closed && label.sub) {
+        const t2 = svgEl("text", { class: "sub", x: 0, y: 13, "text-anchor": "middle" }, lg);
+        t2.textContent = label.sub;
+      }
+    }
+    return g;
+  }
+
+  // Pages whose annotations have been loaded this session.
+  loadedPages() {
+    return this.doc ? [...this.doc.annotsP.keys()] : [];
+  }
+
+  // Measurements on the given pages (loading their annotations if needed).
+  async measurementsOn(pages) {
+    const d = this.doc;
+    if (!d) return [];
+    await Promise.all(pages.map((i) => this._loadAnnots(i)));
+    if (this.doc !== d) return [];
+    const out = [];
+    for (const i of pages) for (const a of d.annots.get(i) || []) if (a.measure && a.scale) out.push([i, a]);
+    return out;
+  }
+
+  // Re-label measurements with each page's current scale (one undo step).
+  rescaleMeasurements(list, scaleFor) {
+    const ops = [];
+    for (const [i, d] of list) {
+      const sc = scaleFor(i);
+      if (!sc || sameScale(d.scale, sc)) continue;
+      const scale = { mPerPt: sc.mPerPt, unit: sc.unit, label: sc.label };
+      const nd = { ...this._payload(d), scale, contents: measureText(d.type, d.pts, scale, d.dp).contents };
+      ops.push({ op: "del", page: i, data: d }, { op: "add", page: i, data: nd });
+    }
+    if (!ops.length) return 0;
+    this._apply(ops, false);
+    this._pushHistory(ops);
+    return ops.length / 2;
+  }
+
   // ------------------------------------------------------------ annotations
   _loadAnnots(i) {
     const d = this.doc;
-    if (d.annots.has(i) || d.annotsLoading.has(i)) return;
-    d.annotsLoading.add(i);
-    this.engine.pageAnnots(i).then((list) => {
+    let pr = d.annotsP.get(i);
+    if (pr) return pr;
+    pr = this.engine.pageAnnots(i).then((list) => {
       if (this.doc !== d || !list) return;
-      d.annotsLoading.delete(i);
       const local = d.annots.get(i) || [];
       d.annots.set(i, list.concat(local));
       for (const a of list) this._drawAnnot(i, a);
     }).catch((err) => console.warn("annots", err));
+    d.annotsP.set(i, pr);
+    return pr;
   }
 
   _drawAnnot(i, d) {
@@ -1385,6 +1899,9 @@ export class Viewer {
       node = svgEl("path", { d: d.quads.map((q) => "M" + quadPoly(q).map((p) => p.join(" ")).join("L") + "Z").join(""), fill: cssColor(d.color) });
       if (d.opacity < 1) node.setAttribute("fill-opacity", d.opacity);
       s.svgHl.insertBefore(node, s.prevHl);
+    } else if (d.measure) {
+      node = this._measureGroup(d.type, d.pts, cssColor(d.color), this._measureLabel(d), false);
+      s.svgMeas.insertBefore(node, s.prevMeas);
     }
     if (node) this._nodes.set(d, node);
   }
@@ -1399,6 +1916,7 @@ export class Viewer {
     if (d.rect) o.rect = d.rect;
     if (d.fill) o.fill = d.fill;
     if (d.quads) o.quads = d.quads;
+    if (d.measure) Object.assign(o, { measure: true, pts: d.pts, contents: d.contents, scale: d.scale, dp: d.dp });
     return o;
   }
 

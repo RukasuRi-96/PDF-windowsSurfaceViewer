@@ -30,9 +30,38 @@ TOUCH & PEN
   Resting your palm while the pen is near the screen is ignored.
   The finger button in the toolbar (or T) lets one finger draw instead.
 
+MOUSE
+  Middle-button drag ..... pan the page (whatever tool is selected)
+  Mouse wheel ............ scrolls pages, or zooms at the pointer.
+                           Choose in the  ...  menu: "Mouse wheel scrolls"
+                           or "Mouse wheel zooms". Ctrl+wheel always zooms;
+                           in zoom mode Shift+wheel scrolls.
+
 TOOLS (tap the active tool again for colors and thickness)
-  Pan (H)  Highlight (M)  Pen (P)  Box (B)  Eraser (E)
+  Select (V)  Pan (H)  Highlight (M)  Pen (P)  Box (B)  Eraser (E)  Measure (R)
   Highlight snaps to text; where there is no text it becomes a marker.
+
+SELECT & COPY TEXT (V)
+  Drag over text to select it (across pages too). Double-click selects a
+  word, triple-click a line, Ctrl+A the whole page. Press Ctrl+C or tap
+  "Copy" on the little bar that appears; "Highlight" turns the selection
+  into a highlight. Dragging on blank paper pans.
+
+MEASURE (R) - distance, path length and area at the drawing's scale
+  1. Set the scale: click the scale button on the measuring bar at the
+     bottom (e.g. 1:100, 1/4" = 1'-0"), or choose "Calibrate" and draw
+     a line over a dimension you know, then type its real length.
+     The scale can apply to all pages or to one page.
+  2. Tap the Measure tool again to pick Distance, Path length or Area,
+     the units (mm, cm, m, km, in, ft, ft-in), decimals and color.
+  Distance: drag, or click the two ends.
+  Path / Area: click each point; double-click, Enter or Done finishes;
+  clicking the first point closes an area. Backspace removes the last
+  point, Esc cancels, Shift snaps to 0/45/90 degrees. With a finger,
+  tap to place points and drag to pan.
+  Measurements are saved into the PDF as standard measurement markups
+  (with the value in their note), and the eraser and undo work on them.
+  If you change the scale later, Inkleaf offers to recalculate them.
 
 SAVING
   Ctrl+S saves the annotations straight into the PDF as standard PDF

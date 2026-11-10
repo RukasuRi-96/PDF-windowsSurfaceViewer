@@ -8,6 +8,8 @@ const names = {
   fitPage: "scan", save: "save", touch: "pointer", more: "ellipsis", file: "file-text", chevron: "chevron-right",
   x: "x", check: "check", openFile: "file-down", external: "external-link", copy: "copy", info: "info",
   collapse: "chevrons-down-up",
+  select: "text-cursor", ruler: "ruler", distance: "move-diagonal-2", path: "waypoints", area: "pentagon",
+  calibrate: "crosshair",
 };
 const dir = path.join(__dirname, "..", "node_modules", "lucide-static", "icons");
 let out = "// Generated from lucide-static (ISC License, https://lucide.dev). Do not edit.\nexport const ICONS = {\n";
