@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'">
+<title>Inkleaf PDF</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header id="toolbar">
+    <div class="tb-group tb-left">
+      <button class="btn icon-btn" id="btn-sidebar" title="Show/hide files (Ctrl+B)"></button>
+      <div id="title"><span id="title-text">Inkleaf PDF</span><span id="dirty-dot" title="Unsaved changes"></span></div>
+    </div>
+    <div class="tb-group tb-tools" role="toolbar" aria-label="Tools">
+      <div class="seg" id="tools">
+        <button class="btn icon-btn tool" data-tool="hand" title="Pan (H)"></button>
+        <button class="btn icon-btn tool" data-tool="highlight" title="Highlight (M)"></button>
+        <button class="btn icon-btn tool" data-tool="pen" title="Pen (P)"></button>
+        <button class="btn icon-btn tool" data-tool="box" title="Box (B)"></button>
+        <button class="btn icon-btn tool" data-tool="eraser" title="Eraser (E)"></button>
+      </div>
+      <button class="btn icon-btn" id="btn-style" title="Color and size"><span class="swatch-dot"></span></button>
+      <button class="btn icon-btn" id="btn-touch" title="Finger draws (T). Off: finger pans and zooms, pen draws."></button>
+      <span class="tb-sep"></span>
+      <button class="btn icon-btn" id="btn-undo" title="Undo (Ctrl+Z)"></button>
+      <button class="btn icon-btn" id="btn-redo" title="Redo (Ctrl+Y)"></button>
+    </div>
+    <div class="tb-group tb-right">
+      <div class="zoom">
+        <button class="btn icon-btn" id="btn-zoomout" title="Zoom out (Ctrl+-)"></button>
+        <button class="btn" id="zoom-label" title="Zoom options">100%</button>
+        <button class="btn icon-btn" id="btn-zoomin" title="Zoom in (Ctrl+=)"></button>
+        <button class="btn icon-btn hide-narrow" id="btn-fitw" title="Fit width (Ctrl+0)"></button>
+        <button class="btn icon-btn hide-narrow" id="btn-fitp" title="Fit page (Ctrl+9)"></button>
+      </div>
+      <button class="btn icon-btn" id="btn-save" title="Save (Ctrl+S)"></button>
+      <button class="btn icon-btn" id="btn-more" title="More"></button>
+    </div>
+  </header>
+  <div id="main">
+    <aside id="sidebar"></aside>
+    <div id="resizer" title="Drag to resize"></div>
+    <section id="stage">
+      <div id="viewer"></div>
+      <div id="empty">
+        <div class="empty-card">
+          <div class="logo"></div>
+          <h1>Inkleaf PDF</h1>
+          <p id="empty-msg">Open a folder to see every PDF inside it, including subfolders.</p>
+          <button class="btn primary" id="empty-open"></button>
+          <ul class="tips">
+            <li><b>Finger</b> — drag to pan, pinch to zoom, double-tap to zoom</li>
+            <li><b>Pen</b> — writes with the selected tool; flip it over to erase</li>
+            <li><b>Ctrl+S</b> saves annotations straight into the PDF</li>
+          </ul>
+        </div>
+      </div>
+      <div id="loading"><div class="spinner"></div></div>
+      <div id="pagepill" role="button" title="Go to page">–</div>
+      <div id="toasts"></div>
+    </section>
+  </div>
+</div>
+<div id="popover" hidden></div>
+<div id="modal" hidden></div>
+<script type="module" src="main.js"></script>
+</body>
+</html>

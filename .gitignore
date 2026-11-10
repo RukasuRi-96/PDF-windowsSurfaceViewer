@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Copied from node_modules/mupdf by `npm install` (tools/vendor-mupdf.js)
+app/vendor/
+*.tmp

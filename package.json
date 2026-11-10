@@ -1,0 +1,22 @@
+{
+  "name": "inkleaf",
+  "productName": "Inkleaf PDF",
+  "version": "1.0.1",
+  "description": "Fast touch & pen PDF reader and annotator",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "node tools/devserver.js",
+    "build:win": "node tools/build-win.js",
+    "postinstall": "node tools/vendor-mupdf.js"
+  },
+  "dependencies": {
+    "mupdf": "1.28.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.9.3",
+    "lucide-static": "0.460.0"
+  }
+}
