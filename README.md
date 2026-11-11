@@ -1,10 +1,10 @@
 # Inkleaf PDF
 
-A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. Everything you add is saved into the PDF itself.
+A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
 
 ![Inkleaf PDF measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.3.0** · Windows 10 or 11, 64-bit
+**Current version: 1.4.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -80,13 +80,14 @@ The toolbar in the middle holds the tools:
 
 | Tool | Key | What it does |
 |---|---|---|
-| **Select** | V | Select and copy text. Dragging on blank paper pans. |
+| **Select** | V | Tap or drag any markup to select it, then move, reshape, retype, restyle or delete it. Drag over text to select and copy it. Dragging on blank paper pans. |
 | **Pan** | H | Drag to move around. |
 | **Highlight** | M | Snaps to the text you sweep over. Where there's no text, it becomes a freehand marker. |
 | **Pen** | P | Write or draw freehand. |
-| **Shapes** | B | Box, line, arrow, cloud, callout or text. Tap the tool again (or its small ▾) to choose. See [Shapes, text and callouts](#4-shapes-text-and-callouts). |
+| **Shapes** | B | Box, line, arrow, cloud, callout or text. Tap the tool again (or its small ▾) to choose. It always draws, even on top of other markups. See [Shapes, text and callouts](#4-shapes-text-and-callouts). |
 | **Signature** | S | Place your signature, with its background removed. See [Sign](#5-sign). |
 | **Eraser** | E | Removes the ink, shapes, text, signatures, highlights and measurements you touch. |
+| **Edit content** | X | Erase an area of the page, or retype a line of the page's own text. Tap the tool again (or its ▾) to choose. See [Edit the page's content](#6-edit-the-pages-content). |
 | **Measure** | R | Distance, path length and area at the drawing's scale (see below). |
 
 - **Colors and thickness:** tap the active tool again, or tap the colored dot next to the tools.
@@ -107,21 +108,22 @@ Choose the **Shapes** tool (**B**), then tap it again (or its small ▾) to pick
 | **Callout** | Drag from the spot you're pointing at to where the text should go, then type. The leader line and arrow are added for you. |
 | **Text** | Tap where the text should start, or drag to set how wide it is, then type. |
 
-- While typing, **Enter** starts a new line. Click **Done**, press **Ctrl+Enter**, or tap anywhere else on the page to finish. **Esc** or **Cancel** throws the text away.
+- While typing, **Enter** finishes (so does **Done**, or tapping anywhere else on the page). **Shift+Enter** starts a new line. **Esc** or **Cancel** throws the text away.
 - Long text wraps to the box's width, and the box grows to fit.
 - For text and callouts, the same menu sets the **text size** (9, 12, 18 or 28 pt) and an optional **white background**, which keeps text readable on busy drawings.
 - Text in other languages works too, including accented letters and Chinese.
 
-**Move, reshape and edit** what you've drawn, with the Shapes tool:
+**Move, reshape and edit** any markup with the **Select** tool (**V**). The Shapes, Pen and other drawing tools always draw, so you can add text or another shape on top of a box.
 
-- **Tap a shape** (pen, mouse or finger) to select it. A dashed frame and handles appear.
-- **Drag it** to move it.
+- **Tap a markup** (pen, mouse or finger) to select it: shapes, text, callouts, pen strokes, signatures, highlights and measurements. A dashed frame and handles appear. With the pen or mouse you can also press on a markup and drag it straight away.
+- If another markup lies on top of the selected one, tap it to select that one instead.
+- **Drag it** to move it. Highlights and measurements stay where they are; they can be deleted.
   - Drag a **corner** of a box or cloud to resize it.
   - Drag either **end** of a line or arrow.
   - Drag a callout's **round tip** to point it somewhere else. Moving a callout's box keeps its tip where it was.
 - **Retype** a text box or callout: tap it again, click **Edit text**, or press **Enter**. Delete all the text to remove it.
-- **Restyle:** with a shape selected, the colour, thickness, text size and white-background choices in the Shapes menu apply to it.
-- **Delete** with the **Delete** key or the **Delete** button. Tap blank paper or press **Esc** to deselect.
+- **Restyle:** with a shape or pen stroke selected, tap the coloured dot next to the tools. Its colour, thickness, text size and white-background choices apply to the selection.
+- **Delete** with the **Delete** (or **Backspace**) key or the **Delete** button. Tap blank paper or press **Esc** to deselect.
 
 Each change updates the same markup in the PDF, so replies or status added to it in Acrobat or Bluebeam stay attached. Every change is one undo step.
 
@@ -138,13 +140,24 @@ Each change updates the same markup in the PDF, so replies or status added to it
 
 Next time:
 - tap a signature in **My signatures** to place it, or, with the Signature tool, just **tap the page** to place your last signature there at the size you used last;
-- to move or resize a signature already on the page, **tap it** with the Signature tool;
+- to move, resize or delete a signature already on the page, **tap it** with the Signature tool, then drag it, or click **Delete** (or press **Delete**). With the Select tool you can also tap it and press **Delete**;
 - keep signature images in a folder and click **Choose folder…** in the panel: its images are listed there too, and picking one goes through **Prepare signature**;
 - to remove a signature from **My signatures**, hover over it (or tap) and click its **×**. Signatures already placed in PDFs stay.
 
 Signatures are saved in the PDF as stamp annotations with a transparent image, so they look the same in Acrobat, Edge and other PDF apps.
 
-### 6. Select and copy text
+### 6. Edit the page's content
+
+The **Edit content** tool (**X**) changes the page itself, not just the markups on top of it. Tap the tool again (or its small ▾) to choose a mode:
+
+- **Erase area:** drag a box over what you want to remove: text, pictures, lines, anything. The area turns white with a red dashed edge. You can still move, resize or delete it with the Select tool, or undo it.
+- **Replace text:** tap a line of the page's text. It opens for editing in a box over the line, in a matching font and size. Change it and press **Enter**. The old line is erased and your text is put in its place. Delete all the text to just remove the line.
+
+Erase areas are applied when you **save**. Inkleaf asks first, because what's under them is removed from the PDF for good: it can't be copied, searched or recovered from the saved file. To keep the original, use **Save as** (**Ctrl+Shift+S**) for the edited version.
+
+> Replacement text is a text box placed over the erased line, so it keeps the original's position, size and colour but can be moved and edited later. Long new text doesn't push the rest of the paragraph along. If the page uses an unusual font, the replacement uses the closest of Helvetica, Times or Courier.
+
+### 7. Select and copy text
 
 1. Choose **Select** (**V**).
 2. Drag over the text you want. A selection can run across several pages, and it scrolls the page when you drag near the edge.
@@ -155,7 +168,7 @@ Signatures are saved in the PDF as stamp annotations with a transparent image, s
 
 Click on blank paper or press **Esc** to clear the selection.
 
-### 7. Measure drawings
+### 8. Measure drawings
 
 1. **Choose Measure** (**R**). A measuring bar appears at the bottom of the page.
 2. **Set the drawing's scale.** Click the scale button on the left of the measuring bar. It says *Scale not set* until you set one.
@@ -181,12 +194,17 @@ Each measurement is saved into the PDF as a standard PDF measurement markup, wit
 
 > A measurement is only as accurate as the scale. For drawings marked *NTS* (not to scale), or ones that may have been printed or scanned at a different size, calibrate against a known dimension first.
 
-### 8. Save
+### 9. Save and embed
 
-- **Ctrl+S** (or the save button) writes your markups into the PDF as standard annotations. Acrobat, Edge, Bluebeam and other PDF apps show them too.
+- **Ctrl+S** (or the save button) writes your markups into the PDF as standard annotations. Acrobat, Edge, Bluebeam and other PDF apps show them too, and they stay movable and editable.
 - **Ctrl+Shift+S** saves a copy under a new name.
 - A blue dot next to the file name means there are unsaved changes. Inkleaf asks before you close or switch files with unsaved changes.
 - If another program changed the file after you opened it, Inkleaf asks before overwriting those changes.
+
+**Embed markups** (**⋯ → Embed markups…**) makes highlights, drawings, shapes, text, callouts and signatures part of the pages. After that they can't be moved, edited or deleted, in Inkleaf or any other PDF app. Use it when you send out a final, signed or marked-up copy. Erase areas are applied at the same time, and form fields stay fillable. You choose:
+
+- **Save as a copy…** (suggested name: *name (embedded).pdf*). The file you have open keeps its editable markups.
+- **Replace this file.** The open file is rewritten with everything embedded. This can't be undone.
 
 ## Keyboard shortcuts
 
@@ -206,12 +224,12 @@ The defaults:
 
 | Keys | Action |
 |---|---|
-| V · H · M · P · B · S · E · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Measure |
+| V · H · M · P · B · S · E · X · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Edit content · Measure |
 | T | Finger draws on/off |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / Redo |
 | Ctrl+C / Ctrl+A | Copy selected text / Select all text on the page |
-| Enter or F2 · Delete | Edit the selected text box or callout · delete the selected shape |
+| Enter or F2 · Delete or Backspace | Edit the selected text box or callout · delete the selected markup or signature |
 | Ctrl + / Ctrl − / Ctrl+0 / Ctrl+9 / Ctrl+1 | Zoom in / out / fit width / fit page / 100% |
 | PgUp / PgDn / Space · Home / End | Scroll a screen · first / last page |
 | Ctrl+G | Go to page |
@@ -224,9 +242,9 @@ These keys always do the same thing in their situation:
 | Keys | Action |
 |---|---|
 | Enter · Backspace · Esc | Finish · remove last point · cancel (while measuring) |
-| Ctrl+Enter · Esc | Finish · cancel a text box or callout you're typing |
+| Enter · Shift+Enter · Esc | Finish · new line · cancel a text box or callout you're typing |
 | Enter · Esc | Place · cancel the signature you're positioning |
-| Esc | Deselect a shape, close a menu, clear a text selection |
+| Esc | Deselect a markup, close a menu, clear a text selection |
 | Shift (while drawing a line or measuring) | Keep it at 0°, 45° or 90° |
 
 ## Troubleshooting
@@ -241,6 +259,9 @@ These keys always do the same thing in their situation:
 | Some of the paper is still visible around a signature | Tap the Signature tool, add the image again, and move **Remove background** further right. Photos with shadows usually need more. |
 | Part of a signature is missing | Move **Remove background** further left, or choose **Black** or **Blue** ink so faint strokes become solid. |
 | A finger draws instead of panning | The finger button (**T**) is on. Tap it to turn it off. |
+| Tapping a markup draws a new one instead of selecting it | Drawing tools always draw. Choose **Select** (**V**), then tap the markup. |
+| A markup can't be moved or deleted | It has been embedded into the page (**⋯ → Embed markups**), or it was flattened by another app. If you kept the copy without embedding, edit that one. |
+| Erased text still shows in another app | Erase areas are applied when you save. Save, then reopen the file there. |
 | The mouse wheel zooms when you want it to scroll (or the reverse) | **⋯ → Mouse wheel scrolls / Mouse wheel zooms** |
 
 ## For developers
@@ -264,6 +285,8 @@ Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with
 | `tools/devserver.js` | Runs the same UI in a normal browser for testing. |
 
 Shapes are standard annotations: box and cloud are `Square` (the cloud uses the PDF's cloudy border effect), line and arrow are `Line`, text and callout are `FreeText` (the callout uses the `FreeTextCallout` intent with a callout line), and signatures are `Stamp` annotations with a transparent image. Each one Inkleaf creates carries an `InkleafShape` key. The viewer draws those from MuPDF's own SVG of the saved appearance, so what you see is exactly what other apps see. Text boxes are sized to the number of lines MuPDF wraps the text into.
+
+Erase areas are `Redact` annotations with an `InkleafShape` key until you save. Saving applies them to a temporary copy of the document: MuPDF's redaction removes the text, covered line art and image pixels under them (other annotations are detached from the page meanwhile, so they survive), the areas are painted white, and the whole file is rewritten with garbage collection, so no old copy of the erased content stays in it. Replacing a line adds an erase area over the line plus a `FreeText` aligned to the old line's baseline. **Embed markups** does the same on a temporary copy, then bakes every annotation into the page content (`bake`, with form widgets left alone).
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
 

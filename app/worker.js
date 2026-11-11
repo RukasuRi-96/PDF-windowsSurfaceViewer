@@ -17,7 +17,9 @@ const MEASURE_SUBJECT = { Line: "Length Measurement", PolyLine: "Length Measurem
 // own SVG of their appearance, so the screen matches the saved file exactly.
 // Anyone else's annotations of these types are left to MuPDF.
 const SHAPE_KEY = "InkleafShape";
-const SHAPE_TYPES = new Set(["Line", "Square", "FreeText", "Stamp"]);
+const SHAPE_TYPES = new Set(["Line", "Square", "FreeText", "Stamp", "Redact"]);
+// Fonts for text boxes (PDF base-14 names MuPDF knows).
+const FONTS = new Set(["Helv", "TiRo", "Cour"]);
 const LIST_CACHE_SIZE = 6;
 
 let doc = null;
@@ -189,8 +191,9 @@ function shapeData(a, type, shape, d) {
     d.color = colorOf(da.color);
     d.fill = colorOf(a.getColor());
     d.width = a.getBorderWidth();
+    if (FONTS.has(da.font) && da.font !== "Helv") d.font = da.font;
     if (shape.k === "callout" && Array.isArray(shape.pts)) d.callout = shape.pts;
-  } else if (type === "Stamp") {
+  } else if (type === "Stamp" || type === "Redact") {
     d.rect = Array.from(a.getRect());
   }
   return d;
@@ -276,9 +279,15 @@ function setShapeProps(a, k, data, info) {
     a.setColor(data.color);
     a.setBorderWidth(data.width);
     a.setRect(data.rect);
+  } else if (k === "sig" || k === "redact") {
+    a.setRect(data.rect);
+  } else if (k === "ink") {
+    a.setColor(data.color);
+    a.setBorderWidth(data.width);
+    a.setInkList(data.ink);
   } else if (k === "text" || k === "callout") {
     a.setContents(data.text);
-    a.setDefaultAppearance("Helv", data.size, data.color);
+    a.setDefaultAppearance(FONTS.has(data.font) ? data.font : "Helv", data.size, data.color);
     a.setBorderWidth(data.width);
     a.setColor(data.fill && data.fill.length ? data.fill : []);
     if (k === "callout") {
@@ -298,11 +307,29 @@ function finishShape(a, k, data, info) {
     const h = Math.max(1, apLineCount(a)) * data.size * 1.2 + 2 * bw + 3;
     a.setRect([r[0], r[1], r[2], r[1] + h]);
     a.update();
+    // Replacing a line of the page's text: put the new first line exactly on
+    // the old line's start and baseline.
+    if (Array.isArray(data.align)) {
+      const o = firstTextOrigin(a);
+      if (o) {
+        const dx = data.align[0] - o[0], dy = data.align[1] - o[1], q = a.getRect();
+        a.setRect([q[0] + dx, q[1] + dy, q[2] + dx, q[3] + dy]);
+        a.update();
+      }
+    }
   }
   const out = { id: a.getObject().asIndirect(), bounds: Array.from(a.getBounds()) };
   if (info) out.svg = annotSvg(a);
-  if (k !== "line" && k !== "arrow") out.rect = Array.from(a.getRect());
+  if (k !== "line" && k !== "arrow" && k !== "ink") out.rect = Array.from(a.getRect());
   return out;
+}
+
+function firstTextOrigin(a) {
+  try {
+    const st = a.toDisplayList().toStructuredText("preserve-whitespace");
+    for (const b of JSON.parse(st.asJSON()).blocks || []) for (const l of b.lines || []) return [l.x, l.y];
+  } catch {}
+  return null;
 }
 
 function createShape(p, data) {
@@ -322,6 +349,8 @@ function createShape(p, data) {
       a.setIntent("FreeTextCallout");
       a.setCalloutStyle("OpenArrow");
     }
+  } else if (k === "redact") {
+    a = p.createAnnotation("Redact");
   } else if (k === "sig") {
     a = p.createAnnotation("Stamp");
     a.setRect(data.rect);
@@ -339,11 +368,96 @@ function createShape(p, data) {
 function updateShape(p, id, data) {
   const a = findAnnot(p, id);
   if (!a) throw new Error("That markup is no longer in the document");
-  const k = data.shape ? data.shape.k : "box";
+  const k = data.shape ? data.shape.k : data.type === "Ink" ? "ink" : "box";
   const info = data.shape ? Object.assign({ v: 1 }, shapeInfo(a) || {}, { k }) : null;
   setShapeProps(a, k, data, info || {});
   try { a.setModificationDate(new Date()); } catch {}
   return finishShape(a, k, data, info);
+}
+
+// Permanently remove what's under Inkleaf's "erase area" boxes: text,
+// covered vector art and image pixels (redaction), then paint the areas
+// white so partly covered lines leave no traces. Returns how many.
+const isEraseArea = (o) => {
+  try {
+    if (o.get("Subtype").asName() !== "Redact") return false;
+    const v = o.get(SHAPE_KEY);
+    return !!v && v.isString() && JSON.parse(v.asString()).k === "redact";
+  } catch { return false; }
+};
+function applyInkleafRedactions(d) {
+  let count = 0;
+  for (let i = 0; i < d.countPages(); i++) {
+    const pobj = d.findPage(i);
+    const annots = pobj.get("Annots");
+    if (!annots || !annots.isArray() || !annots.length) continue;
+    const mine = [], others = [];
+    for (let k = 0; k < annots.length; k++) { const o = annots.get(k); (isEraseArea(o) ? mine : others).push(o); }
+    if (!mine.length) continue;
+    // MuPDF's redaction also deletes annotations under the areas. Erase areas
+    // only remove page content, so the other markups are kept out of its reach.
+    const only = d.newArray();
+    for (const o of mine) only.push(o);
+    pobj.put("Annots", only);
+    const page = d.loadPage(i);
+    const rects = [];
+    for (const a of page.getAnnotations()) {
+      if (a.getType() !== "Redact") continue;
+      rects.push(Array.from(a.getRect()));
+      a.applyRedaction(0, mupdf.PDFPage.REDACT_IMAGE_PIXELS, mupdf.PDFPage.REDACT_LINE_ART_REMOVE_IF_COVERED, mupdf.PDFPage.REDACT_TEXT_REMOVE);
+      count++;
+    }
+    whiteout(d, page, rects);
+    page.destroy();
+    const left = pobj.get("Annots"), arr = d.newArray();
+    if (left && left.isArray()) for (let k = 0; k < left.length; k++) if (!isEraseArea(left.get(k))) arr.push(left.get(k));
+    for (const o of others) arr.push(o);
+    pobj.put("Annots", arr);
+  }
+  return count;
+}
+
+function whiteout(d, page, rects) {
+  const inv = mupdf.Matrix.invert(page.getTransform());
+  let ops = "q 1 g\n";
+  for (const r of rects) {
+    const R = mupdf.Rect.transform(r, inv);
+    ops += `${R[0].toFixed(3)} ${R[1].toFixed(3)} ${(R[2] - R[0]).toFixed(3)} ${(R[3] - R[1]).toFixed(3)} re\n`;
+  }
+  ops += "f Q\n";
+  // Wrap the existing content in q/Q so its leftover graphics state can't
+  // move our rectangles.
+  const pobj = page.getObject();
+  const old = pobj.get("Contents");
+  const arr = d.newArray();
+  arr.push(d.addStream("q\n", {}));
+  if (old && old.isArray()) for (let k = 0; k < old.length; k++) arr.push(old.get(k));
+  else if (old) arr.push(old);
+  arr.push(d.addStream("Q\n" + ops, {}));
+  pobj.put("Contents", arr);
+}
+
+// A finished copy of the document, made on a temporary copy so the open
+// document is untouched (if writing the file fails or Save as is cancelled,
+// nothing is lost): erase areas applied, optionally every markup embedded
+// into the page content, then a full rewrite so nothing erased survives in
+// the file.
+function exportCopy(bake) {
+  const src = doc.saveToBuffer("");
+  let tmp = null;
+  try {
+    tmp = mupdf.Document.openDocument(src.asUint8Array().slice(), "application/pdf");
+    if (tmp.needsPassword()) tmp.authenticatePassword(docPassword || "");
+    const erased = applyInkleafRedactions(tmp);
+    if (bake) tmp.bake(true, false);
+    const buf = tmp.saveToBuffer("garbage=yes,compress=yes");
+    const bytes = buf.asUint8Array().slice();
+    buf.destroy();
+    return { bytes, erased };
+  } finally {
+    src.destroy();
+    if (tmp) { try { tmp.destroy(); } catch {} }
+  }
 }
 
 function findAnnot(page, id) {
@@ -439,6 +553,33 @@ const handlers = {
   },
   updateAnnot({ page, id, data }) {
     return { result: updateShape(entry(page).page, id, data) };
+  },
+  // The line of the page's own text under a point (for "Replace text").
+  lineAt({ page, p }) {
+    const e = entry(page);
+    if (!e.stext) e.stext = e.page.toStructuredText("preserve-whitespace");
+    let best = null, bd = Infinity;
+    for (const b of JSON.parse(e.stext.asJSON()).blocks || []) {
+      if (b.type !== "text") continue;
+      for (const l of b.lines || []) {
+        const bb = l.bbox;
+        if (!bb || !l.text || !l.text.trim()) continue;
+        const dx = p[0] < bb.x ? bb.x - p[0] : p[0] > bb.x + bb.w ? p[0] - bb.x - bb.w : 0;
+        const dy = p[1] < bb.y ? bb.y - p[1] : p[1] > bb.y + bb.h ? p[1] - bb.y - bb.h : 0;
+        const d = dx + dy;
+        if (d < bd) { bd = d; best = l; }
+      }
+    }
+    if (!best || bd > 3) return { result: null };
+    const f = best.font || {};
+    const fam = /mono|courier/i.test(f.family + f.name) ? "Cour" : /serif|times|roman|georgia|garamond|cambria/i.test(f.family + f.name) && !/sans/i.test(f.family + f.name) ? "TiRo" : "Helv";
+    return { result: { text: best.text.replace(/\s+$/, ""), bbox: [best.bbox.x, best.bbox.y, best.bbox.x + best.bbox.w, best.bbox.y + best.bbox.h], origin: [best.x, best.y], size: Math.round((f.size || 11) * 10) / 10, font: fam } };
+  },
+  // The file with erase areas applied ({ bake: true } also embeds every
+  // markup into the pages; form fields stay fillable).
+  exportCopy({ bake }) {
+    const r = exportCopy(!!bake);
+    return { result: r, transfer: [r.bytes.buffer] };
   },
   // A signature stamp as a transparent PNG (to restore it after erasing, or
   // to move/resize one loaded from the file).

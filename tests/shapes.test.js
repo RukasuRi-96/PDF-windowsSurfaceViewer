@@ -34,7 +34,7 @@ const W = process.env.WORK;
   await choose('text');
   await H.pen([[460, 520], [460, 520]]);
   await page.waitForSelector('.text-edit textarea');
-  await page.keyboard.type('Plain text note\nsecond line');
+  await page.keyboard.type('Plain text note'); await page.keyboard.press('Shift+Enter'); await page.keyboard.type('second line');
   await page.click('.te-bar [data-act=done]');
   // Callout: drag from the point being marked to where the text goes, type, Ctrl+Enter
   await choose('callout');

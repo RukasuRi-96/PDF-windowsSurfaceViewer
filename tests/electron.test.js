@@ -1,4 +1,4 @@
-// Real Electron app: select + copy via the clipboard IPC, measure, save, relaunch.
+// Real Electron app: select + copy via the clipboard IPC, measure, save, relaunch, erase + embed.
 const { _electron: electron } = require('playwright');
 const OLD = process.env.WORK, SP = process.env.WORK, R = require('path').join(__dirname, '..');
 const MM = 72 / 25.4;
@@ -61,6 +61,22 @@ const MM = 72 / 25.4;
   await p2.waitForTimeout(500);
   console.log('relaunch: my signatures', await p2.evaluate(() => window.__inkleaf.sigs().length), 'signatures on page', await p2.evaluate(() => (window.__inkleaf.viewer.doc.annots.get(0) || []).filter(a => a.shape && a.shape.k === 'sig').length));
   console.log('relaunch:', await p2.evaluate(() => window.__inkleaf.state.path.split('/').pop()), 'tool', await p2.evaluate(() => window.__inkleaf.viewer.tool), 'scale', await p2.evaluate(() => window.__inkleaf.scaleFor(0).label), 'measures', await p2.evaluate(() => (window.__inkleaf.viewer.doc.annots.get(0) || []).filter(a => a.measure).map(a => a.contents).join()));
+  // Erase an area (applied on save) and embed the markups over the file, through the desktop write path.
+  await p2.keyboard.press('x');
+  const C2 = (x, y) => p2.evaluate(([x, y]) => { const v = window.__inkleaf.viewer; const [sx, sy] = v._screenOf(0, [x, y]); return [sx + v.rect.left, sy + v.rect.top]; }, [x, y]);
+  const a0 = await C2(60, 60), a1 = await C2(260, 140);
+  await p2.mouse.move(a0[0], a0[1]); await p2.mouse.down(); await p2.mouse.move(a1[0], a1[1], { steps: 6 }); await p2.mouse.up();
+  await p2.waitForTimeout(200);
+  await p2.keyboard.press('Control+s');
+  await p2.waitForSelector('.dialog'); await p2.click('.dialog .btn.primary');
+  await p2.waitForFunction(() => !window.__inkleaf.viewer.dirty && window.__inkleaf.viewer.doc?.annotsP.size > 0, null, { timeout: 15000 });
+  await p2.waitForTimeout(600);
+  const kept = await p2.evaluate(() => (window.__inkleaf.viewer.doc.annots.get(0) || []).length);
+  await p2.click('#btn-more'); await p2.click('.menu button:has-text("Embed markups")');
+  await p2.waitForSelector('.dialog'); await p2.click('.dialog .btn:has-text("Replace this file")');
+  await p2.waitForFunction(() => !window.__inkleaf.viewer.dirty && window.__inkleaf.viewer.doc?.annotsP.size > 0, null, { timeout: 15000 });
+  await p2.waitForTimeout(600);
+  console.log('erase + save: markups kept', kept, '· embed over the file: markups left', await p2.evaluate(() => (window.__inkleaf.viewer.doc.annots.get(0) || []).length));
   await app2.close();
   console.log(logs.length ? logs.join('\n') : 'no errors');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

@@ -26,6 +26,7 @@ const cfg = Object.assign(
     sidebarOpen: true,
     sidebarW: 300,
     shape: "box",         // box tool: box | line | arrow | cloud | callout | text
+    contentMode: "erase", // edit content tool: erase | replace
     textStyle: null,
     sigFolder: null,      // folder of signature images
     lastSig: null,        // id of the signature placed last
@@ -53,6 +54,8 @@ cfg.styles = Object.assign(
 cfg.textStyle = Object.assign({ size: 12, fillText: false, fillCallout: true }, cfg.textStyle || {});
 const SHAPES = [["box", "square", "Box"], ["line", "line", "Line"], ["arrow", "arrow", "Arrow"], ["cloud", "cloud", "Cloud"], ["callout", "callout", "Callout"], ["text", "text", "Text"]];
 if (!SHAPES.some(([k]) => k === cfg.shape)) cfg.shape = "box";
+const CONTENT_MODES = [["erase", "eraseArea", "Erase area", "Drag a box over what to remove. It is removed for good when you save."], ["replace", "replaceText", "Replace text", "Tap a line of the page's text, retype it, press Enter."]];
+if (!CONTENT_MODES.some(([k]) => k === cfg.contentMode)) cfg.contentMode = "erase";
 const TEXT_SIZES = [9, 12, 18, 28];
 cfg.measure = Object.assign({ mode: "distance", color: "#ea580c", dp: null, unit: "mm" }, cfg.measure || {});
 cfg.scales = cfg.scales || {};
@@ -85,9 +88,11 @@ const viewer = new Viewer($("#viewer"), engine, {
   scaleFor: (i) => scaleFor(i),
   onCopy: (text) => copyText(text),
   onError: (msg) => toast(msg, "error"),
+  onInfo: (msg) => toast(msg),
   onSignTap: (page, p, hit) => signTap(page, p, hit),
   onSigned: (sig, rect) => signed(sig, rect),
   onPlacing: (on) => appEl.classList.toggle("placing", on),
+  onShapeSelect: () => { updateStyleButton(); if (!pop.hidden && popAnchor === $("#btn-style") && cfg.tool === "select") closePopover(); },
   onHistory(canUndo, canRedo, dirty) {
     $("#btn-undo").disabled = !canUndo;
     $("#btn-redo").disabled = !canRedo;
@@ -125,25 +130,49 @@ const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", p
 function updateToolIcons() {
   for (const b of document.querySelectorAll(".tool")) {
     const t = b.dataset.tool;
-    const ic = t === "box" ? SHAPES.find(([k]) => k === cfg.shape)[1] : TOOL_ICONS[t];
-    b.innerHTML = icon(ic) + (t === "box" ? `<span class="caret" data-caret="1">${icon("caret")}</span>` : "");
+    const ic = t === "box" ? SHAPES.find(([k]) => k === cfg.shape)[1] : t === "content" ? CONTENT_MODES.find(([k]) => k === cfg.contentMode)[1] : TOOL_ICONS[t];
+    b.innerHTML = icon(ic) + (t === "box" || t === "content" ? `<span class="caret" data-caret="1">${icon("caret")}</span>` : "");
   }
 }
 updateToolIcons();
 const pagePill = $("#pagepill");
 
-function setTool(t) {
-  cfg.tool = t;
-  viewer.setTool(t);
-  for (const b of document.querySelectorAll(".tool")) b.classList.toggle("active", b.dataset.tool === t);
-  const st = t === "measure" ? cfg.measure : cfg.styles[t];
+// With the Select tool, the colour/size menu styles the selected markup.
+function selStyleTool() {
+  const k = viewer.selectedShape;
+  return SHAPES.some(([s]) => s === k) ? "box" : k === "ink" ? "pen" : null;
+}
+function updateStyleButton() {
+  const t = cfg.tool === "select" ? selStyleTool() : cfg.tool;
+  const st = t === "measure" ? cfg.measure : t && cfg.styles[t];
   const sb = $("#btn-style");
   sb.classList.toggle("na", !st);
   sb.disabled = !st;
   if (st) sb.querySelector(".swatch-dot").style.background = st.color;
+}
+
+function setTool(t) {
+  cfg.tool = t;
+  viewer.setTool(t);
+  for (const b of document.querySelectorAll(".tool")) b.classList.toggle("active", b.dataset.tool === t);
+  updateStyleButton();
   appEl.classList.toggle("measuring", t === "measure");
   if (t === "measure") updateMeasureBar();
   saveCfg();
+}
+
+function setContentMode(m, announce = true) {
+  cfg.contentMode = m;
+  viewer.setContentMode(m);
+  updateToolIcons();
+  if (cfg.tool !== "content") setTool("content");
+  saveCfg();
+  if (announce) toast(CONTENT_MODES.find(([k]) => k === m)[3]);
+}
+function openContentMenu() {
+  showMenu($('.tool[data-tool="content"]'), CONTENT_MODES.map(([k, ic, label]) => ({
+    label: label + (cfg.contentMode === k ? " ✓" : ""), icon: ic, key: keyOf("content." + k), run: () => setContentMode(k),
+  })));
 }
 
 function applyStyles() {
@@ -151,6 +180,7 @@ function applyStyles() {
   viewer.setMeasureStyle({ color: hexToRgb(cfg.measure.color), dp: cfg.measure.dp });
   viewer.measureMode = cfg.measure.mode;
   viewer.setShape(cfg.shape);
+  viewer.setContentMode(cfg.contentMode);
   viewer.setTextStyle(cfg.textStyle);
 }
 
@@ -210,6 +240,8 @@ $("#tools").addEventListener("click", (e) => {
   const t = b.dataset.tool;
   if (t === "sign") { if (cfg.tool !== "sign") setTool("sign"); openSignPanel(); return; }
   if (t === "box" && e.target.closest("[data-caret]")) { if (cfg.tool !== "box") setTool("box"); openStylePopover(); return; }
+  if (t === "content" && (cfg.tool === "content" || e.target.closest("[data-caret]"))) { if (cfg.tool !== "content") setTool("content"); openContentMenu(); return; }
+  if (t === "content") { setTool("content"); toast(CONTENT_MODES.find(([k]) => k === cfg.contentMode)[3]); return; }
   if (t === cfg.tool && cfg.tool === "measure") openMeasurePopover();
   else if (t === cfg.tool && cfg.styles[cfg.tool]) openStylePopover();
   else setTool(t);
@@ -243,6 +275,7 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   { label: "Save", icon: "save", key: keyOf("file.save"), run: () => save(), disabled: !state.path },
   { label: "Save as…", key: keyOf("file.saveAs"), run: () => save({ as: true }), disabled: !state.path },
   { label: "Show in folder", icon: "external", run: () => host.showInFolder(state.path), disabled: !state.path },
+  { label: "Embed markups…", icon: "layers", key: keyOf("file.embed"), run: () => embedMarkups(), disabled: !state.path },
   "-",
   { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
   { label: "Drawing scale…", icon: "ruler", run: () => scaleDialog(), disabled: !state.path },
@@ -294,19 +327,20 @@ function showMenu(anchor, items) {
 }
 
 function openStylePopover() {
-  const tool = cfg.tool;
+  const selecting = cfg.tool === "select";
+  const tool = selecting ? selStyleTool() : cfg.tool;
   const pal = PALETTES[tool];
   if (!pal) return;
   const anchor = $("#btn-style");
   if (!pop.hidden && (popAnchor === anchor || popAnchor === toolButton(tool))) { closePopover(); return; }
   const st = cfg.styles[tool];
-  const selKind = tool === "box" ? viewer.selectedShape : null;
+  const selKind = selecting ? viewer.selectedShape : null;
   const shape = tool === "box" ? (selKind || cfg.shape) : null;
   const name = tool === "box" ? SHAPES.find(([k]) => k === shape)[2] : { pen: "Pen", highlight: "Highlighter" }[tool];
   const maxW = pal.widths[pal.widths.length - 1];
   const isText = shape === "text" || shape === "callout";
   let html = "";
-  if (tool === "box") {
+  if (tool === "box" && !selecting) {
     html += `<div class="pop-title">Shape</div><div class="shapes">${SHAPES.map(([k, ic, l]) => `<button class="btn${k === shape ? " sel" : ""}" data-shape="${k}" title="${l}">${icon(ic)}<span>${l}</span></button>`).join("")}</div>`;
   }
   html += `<div class="pop-title">${name} color</div><div class="swatches">${pal.colors
@@ -333,14 +367,14 @@ function openStylePopover() {
     const ts = e.target.closest("[data-ts]");
     const sz = e.target.closest("[data-w]");
     // With a shape selected, colour/size changes also apply to it.
-    const sel = tool === "box" && viewer.selectedShape;
+    const sel = selecting && viewer.selectedShape;
     if (sh) { cfg.shape = sh.dataset.shape; updateToolIcons(); }
     else if (sw) { st.color = sw.dataset.c; if (sel) viewer.restyleSelected({ color: hexToRgb(st.color) }); }
     else if (ts) { cfg.textStyle.size = +ts.dataset.ts; if (sel) viewer.restyleSelected({ size: cfg.textStyle.size }); }
     else if (sz) { st.width = +sz.dataset.w; if (sel) viewer.restyleSelected({ width: st.width }); }
     else return;
     applyStyles();
-    setTool(tool);
+    setTool(cfg.tool);
     popAnchor = null;
     openStylePopover();
   };
@@ -415,10 +449,13 @@ async function showHelp() {
     ["Pen", "Draw with the selected tool"], ["Pen eraser end / side button", "Erase"],
     ["Middle-button drag", "Pan the page (any tool)"], ["Mouse wheel", "Scroll or zoom (choose in the ⋯ menu)"],
     ["Ctrl+wheel / Shift+wheel", "Zoom / the other wheel action"],
+    ["Select tool: tap or drag a markup", "Select it, then move, reshape, retype or delete it (Delete key)"],
     ["Select tool: drag over text", "Select it; double-click a word, triple-click a line"],
-    ["Shapes tool ▾", "Box, line, arrow, cloud, callout or text; tap a placed shape to move, reshape or retype it"],
+    ["Shapes tool ▾", "Box, line, arrow, cloud, callout or text; it always draws, even on top of other markups"],
+    ["Typing in a text box", "Enter finishes · Shift+Enter starts a new line · Esc cancels"],
+    ["Edit content tool ▾", "Erase area: drag a box, removed for good when you save · Replace text: tap a line, retype it"],
     ["Callout", "Drag from the spot you're marking to where the text goes, then type"],
-    ["Signature tool", "Pick a signature, drag it into place, Place; tap a placed one to move or resize it"],
+    ["Signature tool", "Pick a signature, drag it into place, Place; tap a placed one to move, resize or delete it"],
     ["Measure tool", "Drag or click two points; path and area: click points, double-click or Enter to finish"],
     ["Shift while drawing a line or measuring", "Snap to 0°, 45°, 90°"],
   ];
@@ -946,18 +983,72 @@ async function openFile(path, { force = false } = {}) {
   }
 }
 
+// Embed every markup into the pages, so it can no longer be moved, edited or
+// deleted (in Inkleaf or any other PDF app). Saved as a copy or over the file.
+async function embedMarkups() {
+  if (!state.path || state.saving) return;
+  viewer.commitEdits();
+  if (viewer.placing) viewer.finishPlacing(true);
+  const erase = viewer.pendingRedactions();
+  const r = await dialog({
+    title: "Embed markups",
+    message: "Highlights, drawings, shapes, text boxes and signatures become part of the pages: they can't be moved, edited or deleted any more." + (erase ? " Erase areas are applied too." : "") + "\n\nSave the result as a new copy (this file keeps its editable markups), or replace this file.",
+    buttons: [{ id: "cancel", label: "Cancel" }, { id: "replace", label: "Replace this file" }, { id: "copy", label: "Save as a copy…", primary: true }],
+  });
+  if (r !== "copy" && r !== "replace") return;
+  state.saving = true;
+  $("#btn-save").classList.add("saving");
+  const seq = viewer.historySeq, path = state.path;
+  let failure = null, reopen = null;
+  try {
+    const out = await engine.exportCopy(true);
+    if (!out) throw new Error("Document closed");
+    if (r === "copy") {
+      const target = await host.saveAs(path.replace(/(\.pdf)?$/i, " (embedded).pdf"), out.bytes);
+      if (target) {
+        if (cfg.scales[path] && !cfg.scales[target]) { cfg.scales[target] = cfg.scales[path]; saveCfg(); }
+        toast(`Saved “${baseName(target)}” with the markups embedded`);
+      }
+    } else {
+      const w = await host.writeFile(path, out.bytes);
+      if (!w || !w.ok) throw new Error(w?.error || "Write failed");
+      viewer.markSaved(seq);
+      reopen = path;
+    }
+  } catch (err) {
+    failure = err;
+  } finally {
+    state.saving = false;
+    $("#btn-save").classList.remove("saving");
+  }
+  if (failure) await dialog({ title: "Couldn't embed the markups", message: `${failure.message}\n\nThe file may be open in another app or in a read-only folder. Nothing was changed.`, buttons: [{ id: "ok", label: "Close", primary: true }] });
+  if (reopen) { await openFile(reopen, { force: true }); toast("Markups embedded"); }
+}
+
 async function save({ as = false } = {}) {
   if (!state.path || state.saving) return;
   viewer.commitEdits();
   if (viewer.placing) viewer.finishPlacing(true);
   if (!as && !viewer.dirty) { toast("No changes to save"); return; }
+  // Erase areas are applied when saving; after that they can't be undone.
+  const erase = viewer.pendingRedactions();
+  if (erase) {
+    const r = await dialog({
+      title: "Erase for good?",
+      message: `${erase === 1 ? "1 erase area" : erase + " erase areas"} will be applied: the text, pictures and drawings under ${erase === 1 ? "it" : "them"} are removed from the PDF and can't be brought back after saving.`,
+      buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Erase and save", primary: true }],
+    });
+    if (r !== "ok") return;
+  }
   state.saving = true;
   $("#btn-save").classList.add("saving");
   const seq = viewer.historySeq;
   const path = state.path;
-  let failure = null, retryAs = false, skip = false;
+  let failure = null, retryAs = false, skip = false, reopen = null;
   try {
-    const out = await engine.save("incremental");
+    // With erase areas the whole file is rewritten, so nothing erased is
+    // left behind in it.
+    const out = erase ? await engine.exportCopy(false) : await engine.save("incremental");
     if (!out) throw new Error("Document closed");
     if (as) {
       const target = await host.saveAs(path, out.bytes);
@@ -968,7 +1059,7 @@ async function save({ as = false } = {}) {
         cfg.lastFile = target;
         sidebar.setCurrent(target);
         viewer.markSaved(seq);
-        toast("Saved as " + baseName(target));
+        if (erase) reopen = target; else toast("Saved as " + baseName(target));
       }
     } else {
       // Don't silently clobber edits another program made after we opened the file.
@@ -988,7 +1079,7 @@ async function save({ as = false } = {}) {
         const after = await host.stat(path).catch(() => null);
         if (after) state.mtime = after.mtime;
         viewer.markSaved(seq);
-        toast("Saved");
+        if (erase) reopen = path; else toast("Saved");
       }
     }
     updateTitle();
@@ -999,6 +1090,8 @@ async function save({ as = false } = {}) {
     $("#btn-save").classList.remove("saving");
   }
   if (retryAs) return save({ as: true });
+  // Show the pages as saved (erased content gone).
+  if (reopen) { await openFile(reopen, { force: true }); toast(erase === 1 ? "Saved · 1 area erased" : `Saved · ${erase} areas erased`); }
   if (failure) {
     const r = await dialog({
       title: "Couldn't save",
@@ -1109,6 +1202,7 @@ function setMeasureModeCmd(m) { cfg.measure.mode = m; setTool("measure"); viewer
 function openToolMenu() {
   if (cfg.tool === "measure") openMeasurePopover();
   else if (cfg.tool === "sign") openSignPanel();
+  else if (cfg.tool === "content") openContentMenu();
   else openStylePopover();
 }
 async function addSignatureFromFile() {
@@ -1129,6 +1223,7 @@ const COMMANDS = [
   { id: "file.openFile", group: "File", label: "Open file…", keys: [], typing: true, run: () => pickFile() },
   { id: "file.save", group: "File", label: "Save", keys: ["Ctrl+S"], typing: true, run: () => save() },
   { id: "file.saveAs", group: "File", label: "Save as…", keys: ["Ctrl+Shift+S"], typing: true, run: () => save({ as: true }) },
+  { id: "file.embed", group: "File", label: "Embed markups into the pages…", keys: [], when: () => !!state.path, run: () => embedMarkups() },
   { id: "file.showInFolder", group: "File", label: "Show in folder", keys: [], when: () => !!state.path, run: () => host.showInFolder(state.path) },
   { id: "file.next", group: "File", label: "Next PDF in the list", keys: ["Alt+ArrowDown"], run: () => stepFile(1) },
   { id: "file.prev", group: "File", label: "Previous PDF in the list", keys: ["Alt+ArrowUp"], run: () => stepFile(-1) },
@@ -1141,9 +1236,9 @@ const COMMANDS = [
   { id: "edit.copy", group: "Edit", label: "Copy selected text", keys: ["Ctrl+C"], when: () => viewer.hasSelection, run: () => copyText(viewer.sel.text) },
   { id: "edit.selectAll", group: "Edit", label: "Select all text on the page", keys: ["Ctrl+A"], when: hasDoc, run: () => { if (cfg.tool !== "select") setTool("select"); viewer.selectAllOnPage(); } },
   { id: "edit.editText", group: "Edit", label: "Edit the selected text box or callout", keys: ["Enter", "F2"], when: () => ["text", "callout"].includes(viewer.selectedShape), run: () => viewer.editSelectedText() },
-  { id: "edit.delete", group: "Edit", label: "Delete the selected shape", keys: ["Delete", "Backspace"], when: () => !!viewer.selectedShape, run: () => viewer.deleteSelectedShape() },
+  { id: "edit.delete", group: "Edit", label: "Delete the selected markup or signature", keys: ["Delete", "Backspace"], when: () => !!viewer.selectedShape || viewer.placingExisting, run: () => (viewer.placingExisting ? viewer.finishPlacing("delete") : viewer.deleteSelectedShape()) },
   // Tools
-  { id: "tool.select", group: "Tools", label: "Select text", keys: ["V"], run: () => setTool("select") },
+  { id: "tool.select", group: "Tools", label: "Select (text and markups)", keys: ["V"], run: () => setTool("select") },
   { id: "tool.hand", group: "Tools", label: "Pan", keys: ["H"], run: () => setTool("hand") },
   { id: "tool.highlight", group: "Tools", label: "Highlight", keys: ["M"], run: () => setTool("highlight") },
   { id: "tool.pen", group: "Tools", label: "Pen", keys: ["P"], run: () => setTool("pen") },
@@ -1151,10 +1246,13 @@ const COMMANDS = [
   { id: "tool.sign", group: "Tools", label: "Signature tool", keys: ["S"], run: () => setTool("sign") },
   { id: "tool.eraser", group: "Tools", label: "Eraser", keys: ["E"], run: () => setTool("eraser") },
   { id: "tool.measure", group: "Tools", label: "Measure", keys: ["R"], run: () => setTool("measure") },
+  { id: "tool.content", group: "Tools", label: "Edit content tool", keys: ["X"], run: () => setTool("content") },
   { id: "tool.touch", group: "Tools", label: "Finger draws on / off", keys: ["T"], run: () => setTouchDraws(!cfg.touchDraws) },
   { id: "tool.menu", group: "Tools", label: "Colour and size menu for the current tool", keys: [], run: () => openToolMenu() },
   // Shapes
   ...SHAPES.map(([k, , l]) => ({ id: "shape." + k, group: "Shapes", label: l, keys: [], run: () => setShapeKind(k) })),
+  // Edit content
+  ...CONTENT_MODES.map(([k, , l]) => ({ id: "content." + k, group: "Edit content", label: l, keys: [], run: () => setContentMode(k) })),
   // Signature
   { id: "sig.panel", group: "Signature", label: "Open My signatures", keys: [], run: () => { if (cfg.tool !== "sign") setTool("sign"); openSignPanel(); } },
   { id: "sig.add", group: "Signature", label: "Add signature from file…", keys: [], run: () => addSignatureFromFile() },
@@ -1228,12 +1326,13 @@ document.addEventListener("keydown", (e) => {
 
 // Toolbar tooltips show the current keys.
 const TITLES = {
-  "tool.select": [".tool[data-tool=select]", "Select text — drag over text to select and copy; drag on blank paper to pan"],
+  "tool.select": [".tool[data-tool=select]", "Select: tap or drag a markup to select, move or delete it; drag over text to select and copy; drag on blank paper to pan"],
   "tool.hand": [".tool[data-tool=hand]", "Pan"],
   "tool.highlight": [".tool[data-tool=highlight]", "Highlight"],
   "tool.pen": [".tool[data-tool=pen]", "Pen"],
-  "tool.box": [".tool[data-tool=box]", "Shapes: box, line, arrow, cloud, callout, text. Tap again to choose; tap a shape to move or edit it"],
-  "tool.sign": [".tool[data-tool=sign]", "Signature: add your signature, then drag it into place"],
+  "tool.box": [".tool[data-tool=box]", "Shapes: box, line, arrow, cloud, callout, text. Tap again to choose. To move or edit a shape, use Select"],
+  "tool.sign": [".tool[data-tool=sign]", "Signature: add your signature, then drag it into place; tap a placed one to move, resize or delete it"],
+  "tool.content": [".tool[data-tool=content]", "Edit content: erase an area of the page, or tap a line of text to retype it. Tap again to choose"],
   "tool.eraser": [".tool[data-tool=eraser]", "Eraser"],
   "tool.measure": [".tool[data-tool=measure]", "Measure distance, path length and area"],
   "tool.touch": ["#btn-touch", "Finger draws on/off. Off: finger pans and zooms, pen draws"],

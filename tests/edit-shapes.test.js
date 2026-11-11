@@ -1,4 +1,4 @@
-// Editing placed shapes: select, move, resize, re-point, retype, restyle,
+// Editing placed shapes with the Select tool: select, move, resize, re-point, retype, restyle,
 // delete, undo, finger taps and drags, save + reload (same annotations, edited in place).
 const { chromium } = require('playwright');
 const { execFileSync } = require('child_process');
@@ -37,6 +37,7 @@ const W = process.env.WORK;
   await page.waitForTimeout(400);
   const start = await all();
   console.log('drawn:', start.map(a => a.k).join(', '));
+  await page.keyboard.press('v'); // the Select tool selects and edits markups
 
   // Box: pen tap selects; drag moves it (same annotation); corner resizes
   await H.pen([[452, 250], [452, 250]]);
@@ -49,8 +50,8 @@ const W = process.env.WORK;
   const se = await handle('se'); await drag(se, [se[0] + 60, se[1] + 30]);
   const box2 = await get('Square');
   console.log('resized (w,h):', box1.rect[2] - box1.rect[0], box1.rect[3] - box1.rect[1], '->', box2.rect[2] - box2.rect[0], box2.rect[3] - box2.rect[1]);
-  // Recolour from the shapes menu while selected
-  await page.click('.tool[data-tool=box] [data-caret]'); await page.waitForTimeout(100);
+  // Recolour from the colour menu while selected
+  await page.click('#btn-style'); await page.waitForTimeout(100);
   await page.click('.swatch[data-c="#1d4ed8"]'); await page.keyboard.press('Escape'); await page.waitForTimeout(200);
   console.log('recoloured:', JSON.stringify((await get('Square')).color));
 

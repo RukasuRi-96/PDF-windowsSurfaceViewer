@@ -4,7 +4,7 @@
 # Each test prints what it checked; compare with tests/README.md.
 #
 # usage: tests/run.sh [test ...]      e.g. tests/run.sh measure select-wheel
-#   tests: annotate documents save-guard select-wheel measure shapes edit-shapes signature shortcuts electron
+#   tests: annotate documents save-guard select-wheel measure shapes edit-shapes signature shortcuts content electron
 # env:   WORK=<dir>  reuse a working folder (samples are generated once)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,7 +23,7 @@ trap 'kill $SERVER 2>/dev/null || true' EXIT
 sleep 1
 
 tests=("$@")
-[ ${#tests[@]} -eq 0 ] && tests=(annotate documents save-guard select-wheel measure shapes edit-shapes signature shortcuts)
+[ ${#tests[@]} -eq 0 ] && tests=(annotate documents save-guard select-wheel measure shapes edit-shapes signature shortcuts content)
 for t in "${tests[@]}"; do
   rm -rf "$WORK/lib" && cp -r "$WORK/samples" "$WORK/lib"
   echo "=== $t"

@@ -45,18 +45,25 @@ MOUSE
 
 TOOLS (tap the active tool again for colors and thickness)
   Select (V)  Pan (H)  Highlight (M)  Pen (P)  Shapes (B)  Signature (S)
-  Eraser (E)  Measure (R)
+  Eraser (E)  Edit content (X)  Measure (R)
   Highlight snaps to text; where there is no text it becomes a marker.
+  Drawing tools always draw, even on top of other markups.
+
+SELECT, MOVE, EDIT OR DELETE A MARKUP (V)
+  With the Select tool, tap any markup: shape, text, callout, pen
+  stroke, signature, highlight or measurement. Drag it to move it, drag
+  its handles to resize or re-point it, tap it again (or Enter) to
+  retype a text box or callout, and press Delete (or the Delete button)
+  to remove it. The colored dot next to the tools restyles it.
+  Highlights and measurements can be deleted but not moved.
 
 SHAPES (B) - tap the tool again (or its small arrow) to choose
   Box, Line, Arrow, Cloud: drag. Shift keeps lines at 0/45/90 degrees.
   Callout: drag from the spot you're marking to where the text goes,
   then type. Text: tap (or drag to set the width), then type.
-  While typing: Enter = new line, Ctrl+Enter or Done = finish,
+  While typing: Enter or Done = finish, Shift+Enter = new line,
   Esc = cancel. The same menu sets text size and a white background.
-  To change a shape later: tap it with the Shapes tool, then drag it to
-  move it, drag its handles to resize or re-point it, tap it again (or
-  Enter) to retype a text box or callout, and Delete to remove it.
+  To change a shape later, use the Select tool (V), see above.
 
 SIGN (S)
   1. Choose the Signature tool and click "Add signature from file..."
@@ -67,9 +74,16 @@ SIGN (S)
   3. Drag the signature into place, drag a corner to resize it, then
      click Place (or press Enter).
   Next time: tap it in My signatures, or just tap the page with the
-  Signature tool to place your last one. Tap a placed signature to move
-  or resize it. "Choose folder..." lists the images in a folder of
-  signatures.
+  Signature tool to place your last one. Tap a placed signature to move,
+  resize or delete it (Delete button or Delete key). "Choose folder..."
+  lists the images in a folder of signatures.
+
+EDIT THE PAGE'S CONTENT (X) - tap the tool again to choose
+  Erase area: drag a box over anything on the page to remove it.
+  Replace text: tap a line of the page's text, retype it, press Enter.
+  Erase areas are applied when you save (Inkleaf asks first): what is
+  under them is removed from the PDF for good. Use Save as to keep the
+  original.
 
 SELECT & COPY TEXT (V)
   Drag over text to select it (across pages too). Double-click selects a
@@ -97,6 +111,12 @@ SAVING
   Ctrl+S saves the annotations straight into the PDF as standard PDF
   annotations, so they show up in Acrobat, Edge, Bluebeam, etc.
   Ctrl+Shift+S = Save as.  Ctrl+Z / Ctrl+Y = undo / redo.
+
+EMBED MARKUPS: More (...) > Embed markups...
+  Makes highlights, drawings, shapes, text and signatures part of the
+  pages, so they can no longer be moved, edited or deleted (in any PDF
+  app). Choose "Save as a copy..." (the open file keeps its editable
+  markups) or "Replace this file".
 
 CHANGE ANY SHORTCUT: More (...) > Keyboard shortcuts (Ctrl+K)
   Search for a command, click "Add shortcut", press the keys you want.

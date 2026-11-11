@@ -91,7 +91,8 @@ function smooth(pts) {
 }
 
 // Tools a finger uses when "finger draws" is on (otherwise a finger pans).
-const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure"]);
+const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure", "content"]);
+const FONT_CSS = { Helv: "Helvetica, Arial, sans-serif", TiRo: '"Times New Roman", Times, serif', Cour: '"Courier New", Courier, monospace' };
 const round2 = (v) => Math.round(v * 100) / 100;
 
 export class Viewer {
@@ -131,17 +132,18 @@ export class Viewer {
       box: { color: [0.86, 0.15, 0.15], width: 2 },
     };
     this.shape = "box";          // box tool: box | line | arrow | cloud | callout | text
+    this.contentMode = "erase";  // edit content tool: erase | replace
     this.textStyle = { size: 12, fillText: false, fillCallout: true };
     this.editor = null;          // text box / callout being typed
     this.shapeSel = null;        // shape selected for moving / editing
     this.placing = null;         // signature being positioned
     this.placeBar = el("div", "placebar", root);
     this.placeBar.hidden = true;
-    this.placeBar.innerHTML = `<span class="pb-text">Drag to move · drag a corner to resize · tap the page to move it there</span><button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="place">Place</button>`;
+    this.placeBar.innerHTML = `<span class="pb-text">Drag to move · drag a corner to resize · tap the page to move it there</span><button class="btn" data-act="delete" hidden>Delete</button><button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="place">Place</button>`;
     this.placeBar.addEventListener("pointerdown", (e) => e.stopPropagation());
     this.placeBar.addEventListener("click", (e) => {
       const b = e.target.closest("[data-act]");
-      if (b) this.finishPlacing(b.dataset.act === "place");
+      if (b) this.finishPlacing(b.dataset.act === "place" ? true : b.dataset.act === "delete" ? "delete" : false);
     });
     this.touchDraws = false;
     this.wheelZooms = false;     // plain mouse wheel zooms instead of scrolling
@@ -469,6 +471,9 @@ export class Viewer {
     s.baseCv.width = s.baseCv.height = 1;
     s.tilesEl = el("div", "tiles", s.el);
     const vb = `${p.x0} ${p.y0} ${p.w} ${p.h}`;
+    // Erase areas sit under every markup: saving removes the page content
+    // beneath them, but markups stay.
+    s.svgErase = svgEl("svg", { class: "annots erase", viewBox: vb, preserveAspectRatio: "none" }, s.el);
     s.svgHl = svgEl("svg", { class: "annots hl", viewBox: vb, preserveAspectRatio: "none" }, s.el);
     s.svgInk = svgEl("svg", { class: "annots ink", viewBox: vb, preserveAspectRatio: "none" }, s.el);
     s.svgSel = svgEl("svg", { class: "annots sel", viewBox: vb, preserveAspectRatio: "none" }, s.el);
@@ -975,6 +980,8 @@ export class Viewer {
       case "erase": this._moveErase(a, e); break;
       case "select": this._moveSelect(a, e); break;
       case "measure": this._measureMove(a, e); break;
+      case "pickmark": this._movePick(a, e); break;
+      case "replace": break;
     }
   }
 
@@ -1033,6 +1040,8 @@ export class Viewer {
       case "erase": this._finishErase(a, cancel); break;
       case "select": this._finishSelect(a, cancel); break;
       case "measure": this._measureUp(a, cancel); break;
+      case "pickmark": if (!cancel) this.selectShape(a.page, a.d); break;
+      case "replace": if (!cancel) this._replaceAt(a.page, a.start); break;
       case "pinch": this._ztCommit(this.vw / 2, this.vh / 2); break;
     }
   }
@@ -1060,7 +1069,8 @@ export class Viewer {
       this._signTap(ptr);
       return;
     }
-    if (tapLike && this.tool === "box" && this._shapeTap(ptr)) return;
+    if (tapLike && this.tool === "select" && this._shapeTap(ptr)) return;
+    if (tapLike && this.tool === "content" && this.contentMode === "replace") { this._replaceTap(ptr); return; }
     if (!cancelled && !a.resumed && ptr.type === "touch" && moved < 12 && t - ptr.t0 < 300) {
       this._tap(ptr);
       return;
@@ -1159,6 +1169,8 @@ export class Viewer {
     if (this.tool === "pen") this._startInk(base, p, e);
     else if (this.tool === "highlight") this._startHighlight(base, p, e);
     else if (this.tool === "box") this._startBox(base, p);
+    else if (this.tool === "content" && this.contentMode === "erase") this._startBox(base, p, "redact");
+    else if (this.tool === "content") this.action = { ...base, kind: "replace", start: p };
     else return false;
     return true;
   }
@@ -1380,9 +1392,9 @@ export class Viewer {
   }
 
   // ---- box tool: box, line, arrow, cloud, callout and text
-  _startBox(base, p) {
+  _startBox(base, p, shape = this.shape) {
     const st = this.styles.box;
-    this.action = { ...base, kind: "box", shape: this.shape, start: p, end: p, moved: false, color: st.color.slice(), width: st.width };
+    this.action = { ...base, kind: "box", shape, start: p, end: p, moved: false, color: st.color.slice(), width: st.width };
     this._drawBoxPreview(this.action);
   }
 
@@ -1428,6 +1440,11 @@ export class Viewer {
       svgEl("path", { ...stroke, "stroke-width": Math.min(w, 2), d: `M${a.end[0]} ${a.end[1]}L${a.start[0]} ${a.start[1]}` + this._arrowHead(a.end, a.start, Math.min(w, 2)) }, g);
       const sz = this.textStyle.size;
       svgEl("rect", { class: "dash", x: a.end[0], y: a.end[1] - sz, width: sz * 8, height: sz * 2, fill: "none", stroke: col, "stroke-width": 1 / this.scale }, g);
+    } else if (a.shape === "redact") {
+      const [x0, y0, x1, y1] = this._boxRect(a);
+      const gg = svgEl("g", { class: "redact" }, g);
+      svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: "rd-fill" }, gg);
+      svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: "rd-line" }, gg);
     } else if (a.shape === "text") {
       if (!a.moved) return;
       const [x0, , x1] = this._boxRect(a);
@@ -1443,10 +1460,6 @@ export class Viewer {
     const s = this._state(a.page);
     s.prevInk.textContent = "";
     if (cancel) return;
-    if (!a.moved) {
-      const hit = this._pickShape(a.page, a.start);
-      if (hit) { this.selectShape(a.page, hit); return; }
-    }
     const k = a.shape;
     if (k === "text" || k === "callout") { this._openTextEditor(a); return; }
     if (k === "line" || k === "arrow") {
@@ -1456,6 +1469,10 @@ export class Viewer {
     }
     const [x0, y0, x1, y1] = this._boxRect(a);
     if ((x1 - x0) * this.scale < 4 || (y1 - y0) * this.scale < 4) return;
+    if (k === "redact") {
+      this._commitAdd(a.page, { type: "Redact", shape: { k }, rect: [x0, y0, x1, y1].map(round2), color: [], width: 0, opacity: 1 });
+      return;
+    }
     const h = a.width / 2;
     const r = [x0 - h, y0 - h, x1 + h, y1 + h].map(round2);
     if (k === "cloud") this._commitAdd(a.page, { type: "Square", shape: { k }, rect: r, color: a.color, opacity: 1, width: a.width });
@@ -1518,9 +1535,10 @@ export class Viewer {
     ta.style.color = col;
     ta.style.borderColor = o.bw ? col : "";
     ta.classList.toggle("bordered", !!o.bw);
-    ta.classList.toggle("filled", !!(o.fill && o.fill.length));
+    ta.classList.toggle("filled", !!((o.fill && o.fill.length) || o.editFill));
+    ta.style.fontFamily = FONT_CSS[o.font] || FONT_CSS.Helv;
     const bar = el("div", "te-bar", box);
-    bar.innerHTML = `<button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="done">Done</button>`;
+    bar.innerHTML = `<span class="te-hint">Shift+Enter: new line</span><button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="done">Done</button>`;
     box.addEventListener("pointerdown", (e) => e.stopPropagation());
     bar.addEventListener("click", (e) => {
       const b = e.target.closest("[data-act]");
@@ -1530,7 +1548,8 @@ export class Viewer {
       // Plain keys stay in the box; Ctrl/Alt/F-key shortcuts (Save…) still work.
       if (!(e.ctrlKey || e.metaKey || e.altKey || /^F\d+$/.test(e.key))) e.stopPropagation();
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this._closeEditor(false); }
-      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); this._closeEditor(true); }
+      // Enter finishes; Shift+Enter starts a new line.
+      else if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); this._closeEditor(true); }
     });
     if (o.callout) {
       const lw = Math.max(o.bw, 1), pts = o.callout;
@@ -1560,6 +1579,22 @@ export class Viewer {
     const text = E.ta.value.replace(/\s+$/, "");
     const lines = text.split("\n").length;
     const rect = [E.x, E.y, E.x + E.W, E.y + lines * E.size * 1.2 + 2 * E.bw + 3].map(round2);
+    if (E.replace) {
+      const R = E.replace;
+      if (text === R.text) return;
+      const ops = [];
+      const red = { type: "Redact", shape: { k: "redact" }, rect: [R.bbox[0] - 0.5, R.bbox[1] - 0.5, R.bbox[2] + 0.5, R.bbox[3] + 0.5].map(round2), color: [], width: 0, opacity: 1 };
+      this._insertAnnot(E.page, red);
+      ops.push({ op: "add", page: E.page, data: red });
+      if (text.trim()) {
+        const d = { type: "FreeText", shape: { k: "text" }, text, size: E.size, color: E.color, fill: [], width: 0, rect, opacity: 1, align: R.origin };
+        if (E.font && E.font !== "Helv") d.font = E.font;
+        this._insertAnnot(E.page, d);
+        ops.push({ op: "add", page: E.page, data: d });
+      }
+      this._pushHistory(ops);
+      return;
+    }
     if (E.target) {
       const d = E.target;
       if (!text.trim()) {
@@ -1574,6 +1609,7 @@ export class Viewer {
     if (!text.trim()) return;
     const d = { type: "FreeText", shape: { k: E.kind }, text, size: E.size, color: E.color, fill: E.fill, width: E.bw, rect, opacity: 1 };
     if (E.callout) d.callout = E.callout;
+    if (E.font && E.font !== "Helv") d.font = E.font;
     this._commitAdd(E.page, d);
   }
 
@@ -1582,20 +1618,22 @@ export class Viewer {
   // box or cloud, move a line's ends or re-point a callout. Tap a selected
   // text box or callout (or "Edit text") to retype it. Changes are made to the
   // same annotation in place, one undo step each.
-  _movable(d) {
-    return !!((d.shape && d.shape.k !== "sig") || (d.type === "Square" && !d.measure && d.rect));
+  _kindOf(d) {
+    if (d.shape) return d.shape.k;
+    if (d.measure) return "measure";
+    return d.type === "Ink" ? "ink" : d.type === "Highlight" ? "highlight" : "box";
   }
 
-  _kindOf(d) { return d.shape ? d.shape.k : "box"; }
+  // Highlights and measurements can be selected (to delete) but not moved.
+  _canMove(kind) { return kind !== "highlight" && kind !== "measure"; }
 
+  // Topmost markup under a point.
   _pickShape(i, p) {
     const tol = 8 / this.scale;
     const list = this.doc.annots.get(i) || [];
     for (let k = list.length - 1; k >= 0; k--) {
-      const d = list[k];
-      if (!this._movable(d)) continue;
-      const kind = this._kindOf(d);
-      if (kind === "box" || kind === "cloud") {
+      const d = list[k], kind = this._kindOf(d);
+      if ((kind === "box" || kind === "cloud" || kind === "redact") && d.rect) {
         const r = d.rect;
         if (p[0] >= r[0] - tol && p[0] <= r[2] + tol && p[1] >= r[1] - tol && p[1] <= r[3] + tol) return d;
       } else if (this._hitAnnot(d, p, tol)) return d;
@@ -1618,7 +1656,7 @@ export class Viewer {
 
   _snap(d) {
     const g = {};
-    for (const k of ["pts", "rect", "text", "size", "color", "fill", "width", "callout"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
+    for (const k of ["pts", "rect", "ink", "text", "size", "font", "color", "fill", "width", "callout"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
     return g;
   }
 
@@ -1649,10 +1687,19 @@ export class Viewer {
     this._drawAnnot(i, d);
   }
 
+  get placingExisting() { return !!(this.placing && this.placing.replace); }
+
   get selectedShape() { return this.shapeSel ? this._kindOf(this.shapeSel.d) : null; }
 
   selectShape(i, d) {
     this.deselectShape();
+    if (this._kindOf(d) === "sig" && !d.href && !d.png) {
+      this.engine.annotImage(i, () => d.id).then((png) => {
+        if (!png || d.png) return;
+        d.png = png;
+        d.href = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+      }).catch(() => {});
+    }
     this.shapeSel = { page: i, d, el: null, geo: null };
     this._renderShapeSel();
     this.cb.onShapeSelect?.(this._kindOf(d), d);
@@ -1683,7 +1730,7 @@ export class Viewer {
     if (k !== "text" && k !== "callout") return;
     this.deselectShape();
     const [x0, y0, x1] = d.rect;
-    this._showEditor({ page: S.page, kind: k, x: x0, y: y0, W: x1 - x0, size: d.size, bw: d.width || 0, fill: d.fill || [], color: d.color, callout: d.callout || null, text: d.text, target: d });
+    this._showEditor({ page: S.page, kind: k, x: x0, y: y0, W: x1 - x0, size: d.size, bw: d.width || 0, fill: d.fill || [], color: d.color, font: d.font, callout: d.callout || null, text: d.text, target: d });
   }
 
   // Recolour / re-size the selected shape from the shapes menu.
@@ -1700,12 +1747,15 @@ export class Viewer {
     return true;
   }
 
-  _selBox(g, kind) {
-    if (kind === "line" || kind === "arrow") {
-      const [a, b] = g.pts, m = Math.max(6 / this.scale, (g.width || 1) * 1.5);
-      return [Math.min(a[0], b[0]) - m, Math.min(a[1], b[1]) - m, Math.max(a[0], b[0]) + m, Math.max(a[1], b[1]) + m];
-    }
-    return g.rect;
+  _selBox(g, kind, d) {
+    let pts = null;
+    if (kind === "line" || kind === "arrow" || kind === "measure") pts = g.pts || d.pts;
+    else if (kind === "ink") pts = (g.ink || d.ink).flat();
+    else if (kind === "highlight") pts = d.quads.flatMap((q) => quadPoly(q));
+    if (!pts) return g.rect;
+    const m = Math.max(6 / this.scale, (g.width || d.width || 1) * 1.5);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    return [Math.min(...xs) - m, Math.min(...ys) - m, Math.max(...xs) + m, Math.max(...ys) + m];
   }
 
   _renderShapeSel() {
@@ -1718,8 +1768,9 @@ export class Viewer {
       S.el?.remove();
       S.el = el("div", "shape-sel", s.el);
       const frame = el("div", "ss-frame", S.el);
-      frame.dataset.role = "move";
-      const roles = kind === "box" || kind === "cloud" ? ["nw", "ne", "sw", "se"] : kind === "line" || kind === "arrow" ? ["p0", "p1"] : kind === "callout" ? ["tip"] : [];
+      if (this._canMove(kind)) frame.dataset.role = "move";
+      else frame.classList.add("fixed");
+      const roles = ["box", "cloud", "redact", "sig"].includes(kind) ? ["nw", "ne", "sw", "se"] : kind === "line" || kind === "arrow" ? ["p0", "p1"] : kind === "callout" ? ["tip"] : [];
       for (const r of roles) { const h = el("div", "ss-h " + r, S.el); h.dataset.role = r; }
       const bar = el("div", "ss-bar", S.el);
       bar.innerHTML = (kind === "text" || kind === "callout" ? `<button class="btn" data-act="edit">Edit text</button>` : "") + `<button class="btn" data-act="delete">Delete</button>`;
@@ -1732,12 +1783,12 @@ export class Viewer {
       S.el.addEventListener("pointerdown", (e) => this._selDown(e));
       this.cb.onDecorate?.(bar);
     }
-    const [x0, y0, x1, y1] = this._selBox(g, kind);
+    const [x0, y0, x1, y1] = this._selBox(g, kind, d);
     const frame = S.el.querySelector(".ss-frame");
     pct(frame, x0, y0);
     frame.style.width = ((x1 - x0) / P.w) * 100 + "%";
     frame.style.height = ((y1 - y0) / P.h) * 100 + "%";
-    frame.classList.toggle("line", kind === "line" || kind === "arrow");
+    frame.classList.toggle("line", ["line", "arrow", "ink", "highlight", "measure"].includes(kind));
     for (const h of S.el.querySelectorAll(".ss-h")) {
       const r = h.dataset.role;
       if (r === "p0" || r === "p1") pct(h, ...g.pts[r === "p0" ? 0 : 1]);
@@ -1755,13 +1806,15 @@ export class Viewer {
     const P = this.doc.pages[S.page], kind = this._kindOf(S.d);
     const g = JSON.parse(JSON.stringify(g0));
     if (role === "move") {
-      const [bx0, by0, bx1, by1] = kind === "line" || kind === "arrow"
-        ? [Math.min(g0.pts[0][0], g0.pts[1][0]), Math.min(g0.pts[0][1], g0.pts[1][1]), Math.max(g0.pts[0][0], g0.pts[1][0]), Math.max(g0.pts[0][1], g0.pts[1][1])]
+      const all = kind === "ink" ? g0.ink.flat() : kind === "line" || kind === "arrow" ? g0.pts : null;
+      const [bx0, by0, bx1, by1] = all
+        ? [Math.min(...all.map((p) => p[0])), Math.min(...all.map((p) => p[1])), Math.max(...all.map((p) => p[0])), Math.max(...all.map((p) => p[1]))]
         : g0.rect;
       dx = clamp(dx, P.x0 - bx0, P.x1 - bx1);
       dy = clamp(dy, P.y0 - by0, P.y1 - by1);
       if (g.pts) g.pts = g0.pts.map((p) => [round2(p[0] + dx), round2(p[1] + dy)]);
-      if (g.rect) g.rect = [g0.rect[0] + dx, g0.rect[1] + dy, g0.rect[2] + dx, g0.rect[3] + dy].map(round2);
+      if (g.ink) g.ink = g0.ink.map((st) => st.map((p) => [round2(p[0] + dx), round2(p[1] + dy)]));
+      if (g.rect && kind !== "ink") g.rect = [g0.rect[0] + dx, g0.rect[1] + dy, g0.rect[2] + dx, g0.rect[3] + dy].map(round2);
       if (kind === "callout") g.callout = this._calloutPts(g0.callout[0], g.rect, g.width || 0, g.size);
     } else if (role === "p0" || role === "p1") {
       const k = role === "p0" ? 0 : 1;
@@ -1771,8 +1824,20 @@ export class Viewer {
     } else if (role === "tip") {
       const tip = this._clampToPage(S.page, [g0.callout[0][0] + dx, g0.callout[0][1] + dy]);
       g.callout = this._calloutPts(tip, g.rect, g.width || 0, g.size);
+    } else if (kind === "sig") {
+      // A signature keeps its proportions.
+      const r = g0.rect, aspect = (r[3] - r[1]) / (r[2] - r[0]);
+      const ax = role.includes("w") ? r[2] : r[0], ay = role.includes("n") ? r[3] : r[1];
+      const px = (role.includes("w") ? r[0] : r[2]) + dx, py = (role.includes("n") ? r[1] : r[3]) + dy;
+      let w = Math.max(16 / this.scale, 8, Math.abs(px - ax), Math.abs(py - ay) / aspect);
+      w = Math.min(w, P.w, P.h / aspect);
+      const h = w * aspect;
+      let nx = role.includes("w") ? ax - w : ax, ny = role.includes("n") ? ay - h : ay;
+      nx = clamp(nx, P.x0, P.x1 - w);
+      ny = clamp(ny, P.y0, P.y1 - h);
+      g.rect = [nx, ny, nx + w, ny + h].map(round2);
     } else {
-      // A corner of a box or cloud: resize from the opposite corner.
+      // A corner of a box, cloud or erase area: resize from the opposite corner.
       const r = g0.rect, min = Math.max(6, 12 / this.scale);
       const ax = role.includes("w") ? r[2] : r[0], ay = role.includes("n") ? r[3] : r[1];
       let px = clamp((role.includes("w") ? r[0] : r[2]) + dx, P.x0, P.x1);
@@ -1792,8 +1857,25 @@ export class Viewer {
     e.preventDefault();
     if (e.pointerType === "touch" && now() - this.lastPen < PALM_MS) return;
     if (e.pointerType === "pen") this.lastPen = now();
-    const role = t.dataset.role, i = S.page, d = S.d, kind = this._kindOf(d);
     try { t.setPointerCapture(e.pointerId); } catch {}
+    this._beginSelDrag(e, t.dataset.role, t, false);
+  }
+
+  // Stand-in drawing of a markup at a new place while it's dragged.
+  _previewNode(tmp, kind) {
+    if (tmp.shape) return this._shapeNode(tmp);
+    if (kind === "ink") {
+      return svgEl("path", { d: tmp.ink.map((st) => "M" + st.map((p) => p.join(" ")).join("L")).join(""), fill: "none", stroke: cssColor(tmp.color), "stroke-width": tmp.width || 1, "stroke-linecap": "round", "stroke-linejoin": "round", opacity: tmp.opacity < 1 ? tmp.opacity : 1 });
+    }
+    const w = tmp.width || 1;
+    return svgEl("rect", { x: tmp.rect[0] + w / 2, y: tmp.rect[1] + w / 2, width: tmp.rect[2] - tmp.rect[0] - w, height: tmp.rect[3] - tmp.rect[1] - w, fill: "none", stroke: cssColor(tmp.color), "stroke-width": w });
+  }
+
+  // Drag the selected markup (or one of its handles). `fresh`: it was only
+  // just selected by this press, so a tap doesn't open it for typing.
+  _beginSelDrag(e, role, target, fresh) {
+    const S = this.shapeSel;
+    const i = S.page, d = S.d, kind = this._kindOf(d);
     const sx = e.clientX, sy = e.clientY, t0 = now(), g0 = this._snap(d);
     let moved = false;
     const move = (ev) => {
@@ -1801,23 +1883,28 @@ export class Viewer {
       if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
       moved = true;
       S.geo = this._dragGeo(S, g0, role, (ev.clientX - sx) / this.scale, (ev.clientY - sy) / this.scale, ev.shiftKey);
-      // Live preview: hide the shape and draw a stand-in at the new place.
+      // Live preview: hide the markup and draw a stand-in at the new place.
       const s = this._state(i);
       this._nodes.get(d)?.setAttribute("visibility", "hidden");
       s.prevInk.textContent = "";
-      const tmp = { ...d, ...S.geo, svg: null };
-      s.prevInk.appendChild(d.shape ? this._shapeNode(tmp) : svgEl("rect", { x: tmp.rect[0] + tmp.width / 2, y: tmp.rect[1] + tmp.width / 2, width: tmp.rect[2] - tmp.rect[0] - tmp.width, height: tmp.rect[3] - tmp.rect[1] - tmp.width, fill: "none", stroke: cssColor(tmp.color), "stroke-width": tmp.width }));
+      s.prevInk.appendChild(this._previewNode({ ...d, ...S.geo, svg: null }, kind));
       this._renderShapeSel();
     };
     const up = (ev) => {
       if (ev.pointerId !== e.pointerId) return;
-      t.removeEventListener("pointermove", move);
-      t.removeEventListener("pointerup", up);
-      t.removeEventListener("pointercancel", up);
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", up);
       if (this.shapeSel !== S) return;
       if (!moved) {
-        // A tap on a selected text box or callout opens it for typing.
-        if (ev.type === "pointerup" && role === "move" && now() - t0 < 500 && (kind === "text" || kind === "callout")) this.editSelectedText();
+        const tap = !fresh && ev.type === "pointerup" && role === "move" && now() - t0 < 500;
+        // A tap on a markup lying on top of the selected one selects that one.
+        if (tap) {
+          const top = this._pickShape(i, this._clientToPage(i, ev.clientX, ev.clientY));
+          if (top && top !== d) { this.selectShape(i, top); return; }
+        }
+        // A tap on an already selected text box or callout opens it for typing.
+        if (tap && (kind === "text" || kind === "callout")) this.editSelectedText();
         return;
       }
       const after = S.geo;
@@ -1827,13 +1914,45 @@ export class Viewer {
       this._updateShape(i, d, after);
       this._renderShapeSel();
     };
-    t.addEventListener("pointermove", move);
-    t.addEventListener("pointerup", up);
-    t.addEventListener("pointercancel", up);
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+    target.addEventListener("pointercancel", up);
   }
 
   // Finish typing (e.g. before saving).
   commitEdits() { this._closeEditor(true); }
+
+  // ---- replacing a line of the page's own text / erasing areas
+  setContentMode(mode) {
+    this._closeEditor(true);
+    this.contentMode = mode;
+    this.root.dataset.content = mode;
+  }
+
+  // Erase areas waiting to be applied (they are applied when saving).
+  pendingRedactions() {
+    let n = 0;
+    for (const list of this.doc ? this.doc.annots.values() : []) for (const d of list) if (d.shape && d.shape.k === "redact") n++;
+    return n;
+  }
+
+  _replaceTap(ptr) {
+    const [wx, wy] = this._toWorld(ptr.x, ptr.y);
+    const i = this._hitPage(wx, wy, 0);
+    if (i >= 0) this._replaceAt(i, this._worldToPage(i, wx, wy));
+  }
+
+  async _replaceAt(i, p) {
+    const doc = this.doc;
+    let line = null;
+    try { line = await this.engine.lineAt(i, p); } catch {}
+    if (this.doc !== doc) return;
+    if (!line) { this.cb.onInfo?.("No text here. To white out part of a page, choose Erase area."); return; }
+    const P = doc.pages[i];
+    const x = line.bbox[0] - 2;
+    const W = Math.max(line.bbox[2] - line.bbox[0] + line.size * 2, P.x1 - x - 12);
+    this._showEditor({ page: i, kind: "text", x, y: line.bbox[1] - 1, W, size: line.size, bw: 0, fill: [], editFill: true, color: [0, 0, 0], font: line.font, text: line.text, replace: line });
+  }
 
   // ---- signatures
   // sig: { href, png, aspect (height / width) }. With `replace`, an existing
@@ -1860,6 +1979,7 @@ export class Viewer {
     }
     this.placing = { sig, page: i, rect, replace: replace || null, replacePage: replace ? replacePage ?? i : null };
     if (replace) this._nodes.get(replace)?.setAttribute("visibility", "hidden");
+    this.placeBar.querySelector('[data-act="delete"]').hidden = !replace;
     this._clampPlacing();
     this._renderPlacing();
     this.placeBar.hidden = false;
@@ -1968,7 +2088,8 @@ export class Viewer {
     this.cb.onSignTap?.(i, p, hit || null);
   }
 
-  // Place (true) or drop (false) the signature being positioned.
+  // Place (true) or drop (false) the signature being positioned; "delete"
+  // removes the signature that was being moved.
   finishPlacing(place) {
     const pl = this.placing;
     if (!pl) return;
@@ -1978,7 +2099,12 @@ export class Viewer {
     const old = pl.replace;
     if (old) this._nodes.get(old)?.removeAttribute("visibility");
     this.cb.onPlacing?.(false);
-    if (!place || !this.doc) return;
+    if (place === "delete" && old && this.doc) {
+      this._removeAnnot(pl.replacePage, old);
+      this._pushHistory([{ op: "del", page: pl.replacePage, data: old }]);
+      return;
+    }
+    if (place !== true || !this.doc) return;
     const rect = pl.rect.map(round2);
     if (old && pl.page === pl.replacePage && rect.every((v, k) => Math.abs(v - old.rect[k]) < 0.01)) return;
     const d = { type: "Stamp", shape: { k: "sig" }, rect, png: pl.sig.png, href: pl.sig.href, color: [], opacity: 1 };
@@ -2109,6 +2235,28 @@ export class Viewer {
     const i = this._pageForPointer(e);
     if (i < 0) return false;
     const p = this._clampToPage(i, this._clientToPage(i, e.clientX, e.clientY));
+    const hit = !e.shiftKey && this._pickShape(i, p);
+    if (hit) {
+      if (this._canMove(this._kindOf(hit))) {
+        // Press on a markup: select it; dragging moves it straight away.
+        this.selectShape(i, hit);
+        this._beginSelDrag(e, "move", this.root, true);
+        return true;
+      }
+      // A highlight or measurement: a tap selects it, a drag still selects text.
+      this.action = { kind: "pickmark", pid: ptr.id, touch, t0: now(), x0: e.clientX, y0: e.clientY, page: i, d: hit, ev: { clientX: e.clientX, clientY: e.clientY, shiftKey: false }, ptr };
+      return true;
+    }
+    return this._startTextSelect(e, ptr, touch, i, p);
+  }
+
+  _movePick(a, e) {
+    if (Math.hypot(e.clientX - a.x0, e.clientY - a.y0) < 4) return;
+    this.action = null;
+    if (this._startTextSelect(a.ev, a.ptr, a.touch, a.page, this._clampToPage(a.page, this._clientToPage(a.page, a.x0, a.y0)))) this._moveSelect(this.action, e);
+  }
+
+  _startTextSelect(e, ptr, touch, i, p) {
     const t = now(), lc = this._lastClick;
     let clicks = 1;
     if (lc && t - lc.t < 450 && Math.hypot(e.clientX - lc.x, e.clientY - lc.y) < (touch ? 24 : 6)) clicks = lc.n >= 3 ? 1 : lc.n + 1;
@@ -2531,7 +2679,10 @@ export class Viewer {
   _drawAnnot(i, d) {
     const s = this._state(i);
     let node;
-    if (d.shape) {
+    if (d.shape && d.shape.k === "redact") {
+      node = this._shapeNode(d);
+      s.svgErase.appendChild(node);
+    } else if (d.shape) {
       node = this._shapeNode(d);
       s.svgInk.insertBefore(node, s.prevInk);
     } else if (d.type === "Ink") {
@@ -2559,6 +2710,13 @@ export class Viewer {
   // arrives (a few ms after creating one) a close approximation stands in.
   _shapeNode(d) {
     const k = d.shape.k;
+    if (k === "redact") {
+      const [x0, y0, x1, y1] = d.rect;
+      const g = svgEl("g", { class: "shape redact" });
+      svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: "rd-fill" }, g);
+      svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: "rd-line" }, g);
+      return g;
+    }
     if (k === "sig" && (d.href || d.png)) {
       if (!d.href) d.href = URL.createObjectURL(new Blob([d.png], { type: "image/png" }));
       const [x0, y0, x1, y1] = d.rect;
@@ -2592,7 +2750,7 @@ export class Viewer {
 
   // MuPDF's drawing of a just-created shape has arrived: swap it in.
   _annotReady(d) {
-    if (!d.shape || !d.svg || (d.shape.k === "sig" && d.href)) return;
+    if (!d.shape || !d.svg || (d.shape.k === "sig" && d.href) || d.shape.k === "redact") return;
     const old = this._nodes.get(d);
     if (!old || !old.parentNode) return;
     const n = this._shapeNode(d);
@@ -2608,7 +2766,10 @@ export class Viewer {
   _payload(d) {
     if (d.shape) {
       const o = { type: d.type, shape: d.shape, color: d.color, opacity: d.opacity, width: d.width };
-      for (const k of ["pts", "rect", "text", "size", "fill", "callout", "png"]) if (d[k] != null) o[k] = d[k];
+      for (const k of ["pts", "rect", "text", "size", "fill", "callout", "png", "font"]) if (d[k] != null) o[k] = d[k];
+      // Replacement text lines up with the old line once, when created (an
+      // undo/redo later must not pull a moved box back).
+      if (d.align) { o.align = d.align; delete d.align; }
       return o;
     }
     const o = { type: d.type, color: d.color, opacity: d.opacity, width: d.width };

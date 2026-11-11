@@ -177,6 +177,11 @@ export class Engine {
       return r;
     });
   }
+  // Line of page text under a point: { text, bbox, origin, size, font } or null.
+  lineAt(page, p) { return this._edit(() => this.edit.call("lineAt", { page, p })); }
+  // The whole file with erase areas applied (and, with bake, every markup
+  // embedded into the pages): { bytes, erased }. The open document is unchanged.
+  exportCopy(bake = false) { return this._edit(() => this.edit.call("exportCopy", { bake })); }
   // Transparent PNG of a signature stamp (null if it no longer exists).
   annotImage(page, getId) {
     return this._edit(() => {
