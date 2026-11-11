@@ -54,6 +54,9 @@ SHAPES (B) - tap the tool again (or its small arrow) to choose
   then type. Text: tap (or drag to set the width), then type.
   While typing: Enter = new line, Ctrl+Enter or Done = finish,
   Esc = cancel. The same menu sets text size and a white background.
+  To change a shape later: tap it with the Shapes tool, then drag it to
+  move it, drag its handles to resize or re-point it, tap it again (or
+  Enter) to retype a text box or callout, and Delete to remove it.
 
 SIGN (S)
   1. Choose the Signature tool and click "Add signature from file..."
@@ -94,6 +97,9 @@ SAVING
   Ctrl+S saves the annotations straight into the PDF as standard PDF
   annotations, so they show up in Acrobat, Edge, Bluebeam, etc.
   Ctrl+Shift+S = Save as.  Ctrl+Z / Ctrl+Y = undo / redo.
+
+CHANGE ANY SHORTCUT: More (...) > Keyboard shortcuts (Ctrl+K)
+  Search for a command, click "Add shortcut", press the keys you want.
 
 OTHER KEYS
   Ctrl+O open folder   Ctrl+F filter files   Ctrl+B show/hide file list

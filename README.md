@@ -4,7 +4,7 @@ A fast PDF reader and markup app for Windows tablets like the Surface Pro, for t
 
 ![Inkleaf PDF measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.2.0** · Windows 10 or 11, 64-bit
+**Current version: 1.3.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -112,6 +112,19 @@ Choose the **Shapes** tool (**B**), then tap it again (or its small ▾) to pick
 - For text and callouts, the same menu sets the **text size** (9, 12, 18 or 28 pt) and an optional **white background**, which keeps text readable on busy drawings.
 - Text in other languages works too, including accented letters and Chinese.
 
+**Move, reshape and edit** what you've drawn, with the Shapes tool:
+
+- **Tap a shape** (pen, mouse or finger) to select it. A dashed frame and handles appear.
+- **Drag it** to move it.
+  - Drag a **corner** of a box or cloud to resize it.
+  - Drag either **end** of a line or arrow.
+  - Drag a callout's **round tip** to point it somewhere else. Moving a callout's box keeps its tip where it was.
+- **Retype** a text box or callout: tap it again, click **Edit text**, or press **Enter**. Delete all the text to remove it.
+- **Restyle:** with a shape selected, the colour, thickness, text size and white-background choices in the Shapes menu apply to it.
+- **Delete** with the **Delete** key or the **Delete** button. Tap blank paper or press **Esc** to deselect.
+
+Each change updates the same markup in the PDF, so replies or status added to it in Acrobat or Bluebeam stay attached. Every change is one undo step.
+
 ### 5. Sign
 
 1. Choose **Signature** (**S**). The signature panel opens.
@@ -177,25 +190,44 @@ Each measurement is saved into the PDF as a standard PDF measurement markup, wit
 
 ## Keyboard shortcuts
 
-In the app, **⋯ → Keyboard & touch help** shows this list.
+**You can change any shortcut**, and give a shortcut to every function, including each shape, signature actions, measuring modes, zoom levels and page navigation:
+
+1. Open **⋯ → Keyboard shortcuts…** (or press **Ctrl+K**).
+2. Find the command (type in the search box).
+3. Click **Add shortcut** (or **+**), then press the keys you want. **Esc** cancels.
+   - If those keys already did something else, they move to the new command, and **Undo** puts them back.
+   - Click **×** on a key to remove it, or **Reset** to go back to the default. **Reset all** restores every default.
+
+Your shortcuts are saved and kept when you update the app. **⋯ → Keyboard, touch and pen help** (**F1**) always shows your current keys.
+
+Shortcuts work by key position, so they keep working with other keyboard layouts and input methods. Plain-letter shortcuts don't fire while you're typing in a box; Ctrl, Alt and F-key shortcuts such as Save still do.
+
+The defaults:
 
 | Keys | Action |
 |---|---|
 | V · H · M · P · B · S · E · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Measure |
 | T | Finger draws on/off |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
-| Ctrl+Z / Ctrl+Y | Undo / Redo |
+| Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / Redo |
 | Ctrl+C / Ctrl+A | Copy selected text / Select all text on the page |
+| Enter or F2 · Delete | Edit the selected text box or callout · delete the selected shape |
+| Ctrl + / Ctrl − / Ctrl+0 / Ctrl+9 / Ctrl+1 | Zoom in / out / fit width / fit page / 100% |
+| PgUp / PgDn / Space · Home / End | Scroll a screen · first / last page |
+| Ctrl+G | Go to page |
+| Alt+↑ / Alt+↓ | Previous / next PDF in the list |
+| Ctrl+O · Ctrl+F · Ctrl+B · F5 | Open folder · filter files · show/hide the file list · refresh it |
+| F11 · F1 · Ctrl+K | Full screen · help · keyboard shortcuts |
+
+These keys always do the same thing in their situation:
+
+| Keys | Action |
+|---|---|
 | Enter · Backspace · Esc | Finish · remove last point · cancel (while measuring) |
 | Ctrl+Enter · Esc | Finish · cancel a text box or callout you're typing |
 | Enter · Esc | Place · cancel the signature you're positioning |
-| Shift (while drawing a line or arrow) | Keep it at 0°, 45° or 90° |
-| Ctrl + / Ctrl − / Ctrl+0 / Ctrl+9 | Zoom in / out / fit width / fit page |
-| PgUp / PgDn / Space | Scroll a screen |
-| Home / End | First / last page |
-| Alt+↑ / Alt+↓ | Previous / next PDF in the list |
-| Ctrl+O · Ctrl+F · Ctrl+B | Open folder · filter files · show/hide the file list |
-| F11 | Full screen |
+| Esc | Deselect a shape, close a menu, clear a text selection |
+| Shift (while drawing a line or measuring) | Keep it at 0°, 45° or 90° |
 
 ## Troubleshooting
 
@@ -223,6 +255,7 @@ Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with
 | `app/engine.js` | Worker pool and priority render queue. The viewer replaces the queue on every view change, so stale work gets dropped. |
 | `app/viewer.js` | Continuous page layout. Pan and pinch run as GPU transforms, and the pages are re-tiled at the new resolution once a gesture settles. Annotations are live SVG vectors, so drawing never forces a page re-render. Also handles text selection and the measuring tool. |
 | `app/measure.js` | Drawing scales, units, label formatting and polygon geometry for the measuring tool. |
+| `app/shortcuts.js` | Key combos by physical key position, display names, and the keymap of user overrides on top of the defaults. Every command and its default keys live in the `COMMANDS` list in `app/main.js`. |
 | `app/sigproc.js` | Signature background removal: paper colour from the image border, automatic threshold (Otsu), soft edges, paper-tint removal at stroke edges, ink recolouring, crop and PNG export. |
 | `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. |
 | `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, and the open/save flow. |

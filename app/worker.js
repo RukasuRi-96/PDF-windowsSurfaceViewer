@@ -265,47 +265,32 @@ function apLineCount(a) {
   }
 }
 
-function createShape(p, data) {
-  const k = data.shape.k;
-  const info = { v: 1, k };
-  let a;
+// Properties that can change after a shape is made (also used when editing
+// one in place, so it keeps its identity and anything attached to it).
+function setShapeProps(a, k, data, info) {
   if (k === "line" || k === "arrow") {
-    a = p.createAnnotation("Line");
     a.setColor(data.color);
     a.setBorderWidth(data.width);
     a.setLine(data.pts[0], data.pts[1]);
-    a.setLineEndingStyles("None", k === "arrow" ? "OpenArrow" : "None");
-  } else if (k === "cloud") {
-    a = p.createAnnotation("Square");
+  } else if (k === "cloud" || k === "box") {
     a.setColor(data.color);
     a.setBorderWidth(data.width);
     a.setRect(data.rect);
-    a.setBorderEffect("Cloudy");
-    a.setBorderEffectIntensity(1);
   } else if (k === "text" || k === "callout") {
-    a = p.createAnnotation("FreeText");
     a.setContents(data.text);
     a.setDefaultAppearance("Helv", data.size, data.color);
     a.setBorderWidth(data.width);
-    if (data.fill && data.fill.length) a.setColor(data.fill);
+    a.setColor(data.fill && data.fill.length ? data.fill : []);
     if (k === "callout") {
-      a.setIntent("FreeTextCallout");
       a.setCalloutLine(data.callout);
-      a.setCalloutStyle("OpenArrow");
       info.pts = data.callout;
     }
     a.setRect(data.rect);
-  } else if (k === "sig") {
-    a = p.createAnnotation("Stamp");
-    a.setRect(data.rect);
-    const img = new mupdf.Image(data.png);
-    a.setStampImage(img);
-    a.setContents("Signature");
-  } else {
-    throw new Error("Unknown shape " + k);
   }
-  if (author) { try { a.setAuthor(author); } catch {} }
-  a.getObject().put(SHAPE_KEY, doc.newString(JSON.stringify(info)));
+}
+
+function finishShape(a, k, data, info) {
+  if (info) a.getObject().put(SHAPE_KEY, doc.newString(JSON.stringify(info)));
   a.update();
   if (k === "text" || k === "callout") {
     // Grow or shrink the box to exactly the lines MuPDF wrapped the text into.
@@ -314,9 +299,51 @@ function createShape(p, data) {
     a.setRect([r[0], r[1], r[2], r[1] + h]);
     a.update();
   }
-  const out = { id: a.getObject().asIndirect(), svg: annotSvg(a), bounds: Array.from(a.getBounds()) };
+  const out = { id: a.getObject().asIndirect(), bounds: Array.from(a.getBounds()) };
+  if (info) out.svg = annotSvg(a);
   if (k !== "line" && k !== "arrow") out.rect = Array.from(a.getRect());
   return out;
+}
+
+function createShape(p, data) {
+  const k = data.shape.k;
+  const info = { v: 1, k };
+  let a;
+  if (k === "line" || k === "arrow") {
+    a = p.createAnnotation("Line");
+    a.setLineEndingStyles("None", k === "arrow" ? "OpenArrow" : "None");
+  } else if (k === "cloud") {
+    a = p.createAnnotation("Square");
+    a.setBorderEffect("Cloudy");
+    a.setBorderEffectIntensity(1);
+  } else if (k === "text" || k === "callout") {
+    a = p.createAnnotation("FreeText");
+    if (k === "callout") {
+      a.setIntent("FreeTextCallout");
+      a.setCalloutStyle("OpenArrow");
+    }
+  } else if (k === "sig") {
+    a = p.createAnnotation("Stamp");
+    a.setRect(data.rect);
+    a.setStampImage(new mupdf.Image(data.png));
+    a.setContents("Signature");
+  } else {
+    throw new Error("Unknown shape " + k);
+  }
+  setShapeProps(a, k, data, info);
+  if (author) { try { a.setAuthor(author); } catch {} }
+  return finishShape(a, k, data, info);
+}
+
+// Change an existing shape (or plain box) in place.
+function updateShape(p, id, data) {
+  const a = findAnnot(p, id);
+  if (!a) throw new Error("That markup is no longer in the document");
+  const k = data.shape ? data.shape.k : "box";
+  const info = data.shape ? Object.assign({ v: 1 }, shapeInfo(a) || {}, { k }) : null;
+  setShapeProps(a, k, data, info || {});
+  try { a.setModificationDate(new Date()); } catch {}
+  return finishShape(a, k, data, info);
 }
 
 function findAnnot(page, id) {
@@ -409,6 +436,9 @@ const handlers = {
     }
     a.update();
     return { result: a.getObject().asIndirect() };
+  },
+  updateAnnot({ page, id, data }) {
+    return { result: updateShape(entry(page).page, id, data) };
   },
   // A signature stamp as a transparent PNG (to restore it after erasing, or
   // to move/resize one loaded from the file).

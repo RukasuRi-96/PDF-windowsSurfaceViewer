@@ -3,6 +3,7 @@ import { Engine } from "./engine.js";
 import { Viewer, cssColor } from "./viewer.js";
 import { Sidebar } from "./sidebar.js";
 import { icon } from "./icons.js";
+import { Keymap, comboFromEvent, formatCombo } from "./shortcuts.js";
 import { loadSignatureImage, analyzeSignature, removeBackground, signaturePng, fromDataUrl, imageMime, IMAGE_EXT } from "./sigproc.js";
 import { UNITS, METRIC_RATIOS, IMPERIAL_SCALES, DEFAULT_SCALE, ratioScale, imperialScale, calibratedScale, fmtLength, ratioOf, sameScale } from "./measure.js";
 
@@ -227,8 +228,8 @@ $("#empty-open").onclick = () => pickFolder();
 $("#zoom-label").onclick = (e) => {
   const z = (pct) => () => viewer.setZoom((pct / 100) * (96 / 72));
   showMenu(e.currentTarget, [
-    { label: "Fit width", icon: "fitWidth", key: "Ctrl+0", run: () => viewer.fit("width") },
-    { label: "Fit page", icon: "fitPage", key: "Ctrl+9", run: () => viewer.fit("page") },
+    { label: "Fit width", icon: "fitWidth", key: keyOf("view.fitWidth"), run: () => viewer.fit("width") },
+    { label: "Fit page", icon: "fitPage", key: keyOf("view.fitPage"), run: () => viewer.fit("page") },
     "-",
     ...[50, 75, 100, 150, 200, 400, 800].map((p) => ({ label: p + "%", run: z(p) })),
     "-",
@@ -236,20 +237,21 @@ $("#zoom-label").onclick = (e) => {
   ]);
 };
 $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
-  { label: "Open folder…", icon: "folderOpen", key: "Ctrl+O", run: pickFolder },
-  { label: "Open file…", icon: "openFile", run: pickFile },
+  { label: "Open folder…", icon: "folderOpen", key: keyOf("file.openFolder"), run: pickFolder },
+  { label: "Open file…", icon: "openFile", key: keyOf("file.openFile"), run: pickFile },
   "-",
-  { label: "Save", icon: "save", key: "Ctrl+S", run: () => save(), disabled: !state.path },
-  { label: "Save as…", key: "Ctrl+Shift+S", run: () => save({ as: true }), disabled: !state.path },
+  { label: "Save", icon: "save", key: keyOf("file.save"), run: () => save(), disabled: !state.path },
+  { label: "Save as…", key: keyOf("file.saveAs"), run: () => save({ as: true }), disabled: !state.path },
   { label: "Show in folder", icon: "external", run: () => host.showInFolder(state.path), disabled: !state.path },
   "-",
-  { label: "Copy selected text", icon: "copy", key: "Ctrl+C", run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
+  { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
   { label: "Drawing scale…", icon: "ruler", run: () => scaleDialog(), disabled: !state.path },
   "-",
   ...wheelItems(),
   "-",
-  { label: "Full screen", key: "F11", run: () => host.toggleFullscreen() },
-  { label: "Keyboard & touch help", icon: "info", run: showHelp },
+  { label: "Full screen", key: keyOf("view.fullscreen"), run: () => host.toggleFullscreen() },
+  { label: "Keyboard shortcuts…", icon: "keyboard", key: keyOf("help.keys"), run: () => shortcutsDialog() },
+  { label: "Keyboard, touch and pen help", icon: "info", key: keyOf("help.help"), run: showHelp },
 ]);
 
 // ------------------------------------------------------------------ popovers
@@ -298,7 +300,8 @@ function openStylePopover() {
   const anchor = $("#btn-style");
   if (!pop.hidden && (popAnchor === anchor || popAnchor === toolButton(tool))) { closePopover(); return; }
   const st = cfg.styles[tool];
-  const shape = tool === "box" ? cfg.shape : null;
+  const selKind = tool === "box" ? viewer.selectedShape : null;
+  const shape = tool === "box" ? (selKind || cfg.shape) : null;
   const name = tool === "box" ? SHAPES.find(([k]) => k === shape)[2] : { pen: "Pen", highlight: "Highlighter" }[tool];
   const maxW = pal.widths[pal.widths.length - 1];
   const isText = shape === "text" || shape === "callout";
@@ -329,10 +332,12 @@ function openStylePopover() {
     const sw = e.target.closest(".swatch");
     const ts = e.target.closest("[data-ts]");
     const sz = e.target.closest("[data-w]");
+    // With a shape selected, colour/size changes also apply to it.
+    const sel = tool === "box" && viewer.selectedShape;
     if (sh) { cfg.shape = sh.dataset.shape; updateToolIcons(); }
-    else if (sw) st.color = sw.dataset.c;
-    else if (ts) cfg.textStyle.size = +ts.dataset.ts;
-    else if (sz) st.width = +sz.dataset.w;
+    else if (sw) { st.color = sw.dataset.c; if (sel) viewer.restyleSelected({ color: hexToRgb(st.color) }); }
+    else if (ts) { cfg.textStyle.size = +ts.dataset.ts; if (sel) viewer.restyleSelected({ size: cfg.textStyle.size }); }
+    else if (sz) { st.width = +sz.dataset.w; if (sel) viewer.restyleSelected({ width: st.width }); }
     else return;
     applyStyles();
     setTool(tool);
@@ -343,6 +348,7 @@ function openStylePopover() {
     const k = e.target.dataset.fill;
     if (!k) return;
     cfg.textStyle[k] = e.target.checked;
+    if (viewer.selectedShape) viewer.restyleSelected({ fill: e.target.checked });
     applyStyles();
     saveCfg();
   };
@@ -402,29 +408,34 @@ function toast(msg, kind = "") {
   setTimeout(() => t.remove(), kind === "error" ? 5000 : 1800);
 }
 
-function showHelp() {
-  const rows = [
+async function showHelp() {
+  closePopover();
+  const gestures = [
     ["Finger drag", "Pan (flick to glide)"], ["Two-finger pinch", "Zoom around your fingers"], ["Double-tap", "Zoom in / back to fit width"],
-    ["Pen", "Draw with the selected tool"], ["Pen eraser end / side button", "Erase"], ["Ctrl+S", "Save into the PDF"],
+    ["Pen", "Draw with the selected tool"], ["Pen eraser end / side button", "Erase"],
     ["Middle-button drag", "Pan the page (any tool)"], ["Mouse wheel", "Scroll or zoom (choose in the ⋯ menu)"],
     ["Ctrl+wheel / Shift+wheel", "Zoom / the other wheel action"],
-    ["Select tool: drag over text", "Select it; double-click a word, triple-click a line"], ["Ctrl+C / Ctrl+A", "Copy selection / select the page's text"],
+    ["Select tool: drag over text", "Select it; double-click a word, triple-click a line"],
+    ["Shapes tool ▾", "Box, line, arrow, cloud, callout or text; tap a placed shape to move, reshape or retype it"],
+    ["Callout", "Drag from the spot you're marking to where the text goes, then type"],
+    ["Signature tool", "Pick a signature, drag it into place, Place; tap a placed one to move or resize it"],
     ["Measure tool", "Drag or click two points; path and area: click points, double-click or Enter to finish"],
-    ["Shift while measuring", "Snap to 0°, 45°, 90°"], ["Backspace / Esc", "Remove last point / cancel measuring"],
-    ["Box tool ▾", "Box, line, arrow, cloud, callout or text (tap the tool again to choose)"],
-    ["Callout", "Drag from the spot you're marking to where the text goes, then type; Ctrl+Enter or Done"],
-    ["Shift while drawing a line", "Snap to 0°, 45°, 90°"],
-    ["Signature tool", "Pick a signature, drag it into place, Place (Enter); tap a placed one to move or resize it"],
-    ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["V  H  M  P  B  S  E  R", "Select, pan, highlight, pen, box, signature, eraser, measure"], ["T", "Toggle finger drawing"],
-    ["Ctrl + / −", "Zoom"], ["Ctrl+0 / Ctrl+9", "Fit width / fit page"], ["PgUp / PgDn, Space", "Scroll a screen"],
-    ["Alt+↑ / Alt+↓", "Previous / next PDF in the list"], ["Ctrl+F", "Filter the file list"], ["Ctrl+B", "Show / hide the file list"],
+    ["Shift while drawing a line or measuring", "Snap to 0°, 45°, 90°"],
   ];
-  dialog({
+  const groups = [...new Set(COMMANDS.map((c) => c.group))];
+  let keysHtml = "";
+  for (const g of groups) {
+    const rows = COMMANDS.filter((c) => c.group === g && keymap.keys(c.id).length);
+    if (!rows.length) continue;
+    keysHtml += `<div class="help-group">${esc(g)}</div>` + rows.map((c) => `<kbd>${esc(keymap.keys(c.id).map(formatCombo).join("  ·  "))}</kbd><span>${esc(c.label)}</span>`).join("");
+  }
+  const r = await dialog({
     title: "Touch, pen, mouse and keyboard",
     wide: true,
-    html: `<div class="shortcuts">${rows.map(([k, v]) => `<kbd>${k}</kbd><span>${v}</span>`).join("")}</div>`,
-    buttons: [{ id: "ok", label: "Close", primary: true }],
+    html: `<div class="shortcuts">${gestures.map(([k, v]) => `<kbd>${k}</kbd><span>${v}</span>`).join("")}${keysHtml}</div>`,
+    buttons: [{ id: "keys", label: "Customize shortcuts…", left: true }, { id: "ok", label: "Close", primary: true }],
   });
+  if (r === "keys") shortcutsDialog();
 }
 
 // ------------------------------------------------------------------ measuring
@@ -1089,65 +1100,255 @@ function pokeIdle() {
 }
 
 // ------------------------------------------------------------------ keyboard
+// Every function is a command with default keys; users can change them in
+// ⋯ → Keyboard shortcuts (saved as cfg.keys). Keys that only mean something
+// in a mode (Enter, Esc, Backspace while measuring, placing or typing) are fixed.
+const hasDoc = () => viewer.pageCount > 0;
+function setShapeKind(k) { cfg.shape = k; updateToolIcons(); applyStyles(); setTool("box"); saveCfg(); }
+function setMeasureModeCmd(m) { cfg.measure.mode = m; setTool("measure"); viewer.setMeasureMode(m); saveCfg(); updateMeasureBar(); }
+function openToolMenu() {
+  if (cfg.tool === "measure") openMeasurePopover();
+  else if (cfg.tool === "sign") openSignPanel();
+  else openStylePopover();
+}
+async function addSignatureFromFile() {
+  if (cfg.tool !== "sign") setTool("sign");
+  const paths = await host.pickImages();
+  if (paths && paths[0]) prepareSignature(paths[0]);
+}
+function placeLastSig() {
+  const last = sigLib.find((x) => x.id === cfg.lastSig) || sigLib[0];
+  if (last) placeSig(last); else openSignPanel();
+}
+const vh = () => viewer.vh;
+const wide = () => viewer.L && viewer.L.worldW > viewer.vw;
+
+const COMMANDS = [
+  // File
+  { id: "file.openFolder", group: "File", label: "Open folder…", keys: ["Ctrl+O"], typing: true, run: () => pickFolder() },
+  { id: "file.openFile", group: "File", label: "Open file…", keys: [], typing: true, run: () => pickFile() },
+  { id: "file.save", group: "File", label: "Save", keys: ["Ctrl+S"], typing: true, run: () => save() },
+  { id: "file.saveAs", group: "File", label: "Save as…", keys: ["Ctrl+Shift+S"], typing: true, run: () => save({ as: true }) },
+  { id: "file.showInFolder", group: "File", label: "Show in folder", keys: [], when: () => !!state.path, run: () => host.showInFolder(state.path) },
+  { id: "file.next", group: "File", label: "Next PDF in the list", keys: ["Alt+ArrowDown"], run: () => stepFile(1) },
+  { id: "file.prev", group: "File", label: "Previous PDF in the list", keys: ["Alt+ArrowUp"], run: () => stepFile(-1) },
+  { id: "file.filter", group: "File", label: "Filter the file list", keys: ["Ctrl+F"], typing: true, run: () => { toggleSidebar(true); sidebar.input.focus(); sidebar.input.select(); } },
+  { id: "file.sidebar", group: "File", label: "Show / hide the file list", keys: ["Ctrl+B"], typing: true, run: () => toggleSidebar() },
+  { id: "file.refresh", group: "File", label: "Refresh the file list", keys: ["F5"], when: () => !!cfg.folder, run: () => loadFolder(cfg.folder, false) },
+  // Edit
+  { id: "edit.undo", group: "Edit", label: "Undo", keys: ["Ctrl+Z"], run: () => viewer.undo() },
+  { id: "edit.redo", group: "Edit", label: "Redo", keys: ["Ctrl+Y", "Ctrl+Shift+Z"], run: () => viewer.redo() },
+  { id: "edit.copy", group: "Edit", label: "Copy selected text", keys: ["Ctrl+C"], when: () => viewer.hasSelection, run: () => copyText(viewer.sel.text) },
+  { id: "edit.selectAll", group: "Edit", label: "Select all text on the page", keys: ["Ctrl+A"], when: hasDoc, run: () => { if (cfg.tool !== "select") setTool("select"); viewer.selectAllOnPage(); } },
+  { id: "edit.editText", group: "Edit", label: "Edit the selected text box or callout", keys: ["Enter", "F2"], when: () => ["text", "callout"].includes(viewer.selectedShape), run: () => viewer.editSelectedText() },
+  { id: "edit.delete", group: "Edit", label: "Delete the selected shape", keys: ["Delete", "Backspace"], when: () => !!viewer.selectedShape, run: () => viewer.deleteSelectedShape() },
+  // Tools
+  { id: "tool.select", group: "Tools", label: "Select text", keys: ["V"], run: () => setTool("select") },
+  { id: "tool.hand", group: "Tools", label: "Pan", keys: ["H"], run: () => setTool("hand") },
+  { id: "tool.highlight", group: "Tools", label: "Highlight", keys: ["M"], run: () => setTool("highlight") },
+  { id: "tool.pen", group: "Tools", label: "Pen", keys: ["P"], run: () => setTool("pen") },
+  { id: "tool.box", group: "Tools", label: "Shapes tool", keys: ["B"], run: () => setTool("box") },
+  { id: "tool.sign", group: "Tools", label: "Signature tool", keys: ["S"], run: () => setTool("sign") },
+  { id: "tool.eraser", group: "Tools", label: "Eraser", keys: ["E"], run: () => setTool("eraser") },
+  { id: "tool.measure", group: "Tools", label: "Measure", keys: ["R"], run: () => setTool("measure") },
+  { id: "tool.touch", group: "Tools", label: "Finger draws on / off", keys: ["T"], run: () => setTouchDraws(!cfg.touchDraws) },
+  { id: "tool.menu", group: "Tools", label: "Colour and size menu for the current tool", keys: [], run: () => openToolMenu() },
+  // Shapes
+  ...SHAPES.map(([k, , l]) => ({ id: "shape." + k, group: "Shapes", label: l, keys: [], run: () => setShapeKind(k) })),
+  // Signature
+  { id: "sig.panel", group: "Signature", label: "Open My signatures", keys: [], run: () => { if (cfg.tool !== "sign") setTool("sign"); openSignPanel(); } },
+  { id: "sig.add", group: "Signature", label: "Add signature from file…", keys: [], run: () => addSignatureFromFile() },
+  { id: "sig.placeLast", group: "Signature", label: "Place my last signature", keys: [], when: hasDoc, run: () => placeLastSig() },
+  // Measure
+  { id: "measure.distance", group: "Measure", label: "Measure distance", keys: [], run: () => setMeasureModeCmd("distance") },
+  { id: "measure.path", group: "Measure", label: "Measure path length", keys: [], run: () => setMeasureModeCmd("path") },
+  { id: "measure.area", group: "Measure", label: "Measure area", keys: [], run: () => setMeasureModeCmd("area") },
+  { id: "measure.scale", group: "Measure", label: "Drawing scale…", keys: [], when: hasDoc, run: () => scaleDialog() },
+  { id: "measure.calibrate", group: "Measure", label: "Calibrate the scale", keys: [], when: hasDoc, run: () => { setTool("measure"); viewer.startCalibrate(); } },
+  // View
+  { id: "view.zoomIn", group: "View", label: "Zoom in", keys: ["Ctrl+=", "Ctrl+Shift+=", "Ctrl++"], repeat: true, run: () => viewer.zoomBy(1.25) },
+  { id: "view.zoomOut", group: "View", label: "Zoom out", keys: ["Ctrl+-"], repeat: true, run: () => viewer.zoomBy(0.8) },
+  { id: "view.fitWidth", group: "View", label: "Fit width", keys: ["Ctrl+0"], run: () => viewer.fit("width") },
+  { id: "view.fitPage", group: "View", label: "Fit page", keys: ["Ctrl+9"], run: () => viewer.fit("page") },
+  { id: "view.actual", group: "View", label: "Actual size (100%)", keys: ["Ctrl+1"], run: () => viewer.setZoom(96 / 72) },
+  { id: "view.fullscreen", group: "View", label: "Full screen", keys: ["F11"], typing: true, run: () => host.toggleFullscreen() },
+  { id: "view.wheel", group: "View", label: "Switch the mouse wheel between scroll and zoom", keys: [], run: () => setWheel(cfg.wheel === "zoom" ? "scroll" : "zoom") },
+  // Navigate
+  { id: "nav.down", group: "Navigate", label: "Scroll down", keys: ["ArrowDown"], repeat: true, run: () => viewer.scrollBy(0, 60) },
+  { id: "nav.up", group: "Navigate", label: "Scroll up", keys: ["ArrowUp"], repeat: true, run: () => viewer.scrollBy(0, -60) },
+  { id: "nav.right", group: "Navigate", label: "Scroll right (or next page)", keys: ["ArrowRight"], repeat: true, run: () => (wide() ? viewer.scrollBy(60, 0) : viewer.pageStep(1)) },
+  { id: "nav.left", group: "Navigate", label: "Scroll left (or previous page)", keys: ["ArrowLeft"], repeat: true, run: () => (wide() ? viewer.scrollBy(-60, 0) : viewer.pageStep(-1)) },
+  { id: "nav.screenDown", group: "Navigate", label: "Down a screen", keys: ["PageDown", "Space"], repeat: true, run: () => viewer.scrollBy(0, vh() * 0.9) },
+  { id: "nav.screenUp", group: "Navigate", label: "Up a screen", keys: ["PageUp", "Shift+Space"], repeat: true, run: () => viewer.scrollBy(0, -vh() * 0.9) },
+  { id: "nav.nextPage", group: "Navigate", label: "Next page", keys: [], repeat: true, run: () => viewer.pageStep(1) },
+  { id: "nav.prevPage", group: "Navigate", label: "Previous page", keys: [], repeat: true, run: () => viewer.pageStep(-1) },
+  { id: "nav.first", group: "Navigate", label: "First page", keys: ["Home"], run: () => viewer.goToPage(0) },
+  { id: "nav.last", group: "Navigate", label: "Last page", keys: ["End"], run: () => viewer.goToPage(viewer.pageCount - 1) },
+  { id: "nav.goto", group: "Navigate", label: "Go to page…", keys: ["Ctrl+G"], when: hasDoc, run: () => pagePill.onclick() },
+  // Help
+  { id: "help.help", group: "Help", label: "Keyboard, touch and pen help", keys: ["F1"], typing: true, run: () => showHelp() },
+  { id: "help.keys", group: "Help", label: "Customize keyboard shortcuts…", keys: ["Ctrl+K"], typing: true, run: () => shortcutsDialog() },
+];
+cfg.keys = cfg.keys && typeof cfg.keys === "object" ? cfg.keys : {};
+const keymap = new Keymap(COMMANDS, cfg.keys);
+
+// Keys that only apply in a mode. Returns true if handled.
+function contextKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  if (e.key === "Escape") {
+    if (!pop.hidden) closePopover();
+    else if (viewer.placing) viewer.finishPlacing(false);
+    else if (viewer.selectedShape) viewer.deselectShape();
+    else if (viewer.mdraft || viewer._calibrating) viewer.cancelMeasure();
+    else if (viewer.hasSelection) viewer.clearSelection();
+    else return false;
+    return true;
+  }
+  if (viewer.placing && e.key === "Enter") { viewer.finishPlacing(true); return true; }
+  if (cfg.tool === "measure" && viewer.mdraft) {
+    if (e.key === "Enter") { viewer.finishMeasure(); return true; }
+    if (e.key === "Backspace") { viewer.measureBack(); return true; }
+  }
+  return false;
+}
+
 document.addEventListener("keydown", (e) => {
   if (!modal.hidden) return;
-  const typing = e.target.closest?.("input, textarea");
-  const ctrl = e.ctrlKey || e.metaKey;
-  const k = e.key.toLowerCase();
-  if (ctrl && k === "s") { e.preventDefault(); save({ as: e.shiftKey }); return; }
-  if (ctrl && k === "o") { e.preventDefault(); pickFolder(); return; }
-  if (ctrl && k === "f") { e.preventDefault(); toggleSidebar(true); sidebar.input.focus(); sidebar.input.select(); return; }
-  if (ctrl && k === "b") { e.preventDefault(); toggleSidebar(); return; }
-  if (e.key === "F11") { e.preventDefault(); host.toggleFullscreen(); return; }
-  if (typing) return;
-  if (ctrl && k === "c" && viewer.hasSelection) { e.preventDefault(); copyText(viewer.sel.text); return; }
-  if (ctrl && k === "a" && viewer.pageCount) { e.preventDefault(); if (cfg.tool !== "select") setTool("select"); viewer.selectAllOnPage(); return; }
-  if (viewer.placing && !ctrl && !e.altKey && (e.key === "Enter" || e.key === "Escape")) {
-    e.preventDefault();
-    viewer.finishPlacing(e.key === "Enter");
-    return;
-  }
-  if (cfg.tool === "measure" && viewer.mdraft && !ctrl && !e.altKey) {
-    if (e.key === "Enter") { e.preventDefault(); viewer.finishMeasure(); return; }
-    if (e.key === "Backspace") { e.preventDefault(); viewer.measureBack(); return; }
-  }
-  if (ctrl && k === "z") { e.preventDefault(); if (e.shiftKey) viewer.redo(); else viewer.undo(); return; }
-  if (ctrl && k === "y") { e.preventDefault(); viewer.redo(); return; }
-  if (ctrl && (k === "=" || k === "+")) { e.preventDefault(); viewer.zoomBy(1.25); return; }
-  if (ctrl && k === "-") { e.preventDefault(); viewer.zoomBy(0.8); return; }
-  if (ctrl && k === "0") { e.preventDefault(); viewer.fit("width"); return; }
-  if (ctrl && k === "9") { e.preventDefault(); viewer.fit("page"); return; }
-  if (e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); stepFile(e.key === "ArrowDown" ? 1 : -1); return; }
-  if (ctrl || e.altKey) return;
-  const vh = viewer.vh;
-  switch (e.key) {
-    case "ArrowDown": viewer.scrollBy(0, 60); break;
-    case "ArrowUp": viewer.scrollBy(0, -60); break;
-    case "ArrowRight": viewer.L && viewer.L.worldW > viewer.vw ? viewer.scrollBy(60, 0) : viewer.pageStep(1); break;
-    case "ArrowLeft": viewer.L && viewer.L.worldW > viewer.vw ? viewer.scrollBy(-60, 0) : viewer.pageStep(-1); break;
-    case "PageDown": viewer.scrollBy(0, vh * 0.9); break;
-    case "PageUp": viewer.scrollBy(0, -vh * 0.9); break;
-    case " ": viewer.scrollBy(0, (e.shiftKey ? -1 : 1) * vh * 0.9); break;
-    case "Home": viewer.goToPage(0); break;
-    case "End": viewer.goToPage(viewer.pageCount - 1); break;
-    case "v": setTool("select"); break;
-    case "h": setTool("hand"); break;
-    case "r": setTool("measure"); break;
-    case "m": setTool("highlight"); break;
-    case "p": setTool("pen"); break;
-    case "b": setTool("box"); break;
-    case "e": setTool("eraser"); break;
-    case "s": setTool("sign"); break;
-    case "t": setTouchDraws(!cfg.touchDraws); break;
-    case "Escape":
-      if (!pop.hidden) closePopover();
-      else if (viewer.mdraft || viewer._calibrating) viewer.cancelMeasure();
-      else if (viewer.hasSelection) viewer.clearSelection();
-      break;
-    default: return;
-  }
+  const typing = !!e.target.closest?.("input, textarea, select") || viewer.editing;
+  if (!typing && contextKey(e)) { e.preventDefault(); return; }
+  const combo = comboFromEvent(e);
+  const cmd = combo && keymap.byId.get(keymap.lookup(combo));
+  if (!cmd) return;
+  if (typing && !cmd.typing) return;
+  if (cmd.when && !cmd.when()) return;
   e.preventDefault();
+  if (e.repeat && !cmd.repeat) return;
+  cmd.run(e);
 });
+
+// Toolbar tooltips show the current keys.
+const TITLES = {
+  "tool.select": [".tool[data-tool=select]", "Select text — drag over text to select and copy; drag on blank paper to pan"],
+  "tool.hand": [".tool[data-tool=hand]", "Pan"],
+  "tool.highlight": [".tool[data-tool=highlight]", "Highlight"],
+  "tool.pen": [".tool[data-tool=pen]", "Pen"],
+  "tool.box": [".tool[data-tool=box]", "Shapes: box, line, arrow, cloud, callout, text. Tap again to choose; tap a shape to move or edit it"],
+  "tool.sign": [".tool[data-tool=sign]", "Signature: add your signature, then drag it into place"],
+  "tool.eraser": [".tool[data-tool=eraser]", "Eraser"],
+  "tool.measure": [".tool[data-tool=measure]", "Measure distance, path length and area"],
+  "tool.touch": ["#btn-touch", "Finger draws on/off. Off: finger pans and zooms, pen draws"],
+  "edit.undo": ["#btn-undo", "Undo"],
+  "edit.redo": ["#btn-redo", "Redo"],
+  "file.save": ["#btn-save", "Save"],
+  "file.sidebar": ["#btn-sidebar", "Show/hide files"],
+  "view.zoomIn": ["#btn-zoomin", "Zoom in"],
+  "view.zoomOut": ["#btn-zoomout", "Zoom out"],
+  "view.fitWidth": ["#btn-fitw", "Fit width"],
+  "view.fitPage": ["#btn-fitp", "Fit page"],
+};
+function refreshTitles() {
+  for (const [id, [sel, text]] of Object.entries(TITLES)) {
+    const node = document.querySelector(sel);
+    if (!node) continue;
+    const k = keymap.labelAll(id);
+    node.title = k ? `${text} (${k})` : text;
+  }
+}
+refreshTitles();
+const keyOf = (id) => keymap.label(id) || undefined;
+
+// ⋯ → Keyboard shortcuts: change, add or remove keys for any command.
+function shortcutsDialog() {
+  closePopover();
+  let recording = null, note = null, query = "";
+  const groups = [...new Set(COMMANDS.map((c) => c.group))];
+  let list;
+  const changed = () => { saveCfg(); refreshTitles(); };
+  const render = () => {
+    const q = query.trim().toLowerCase();
+    let html = "";
+    for (const g of groups) {
+      const rows = COMMANDS.filter((c) => c.group === g && (!q || (c.label + " " + g + " " + keymap.keys(c.id).map(formatCombo).join(" ")).toLowerCase().includes(q)));
+      if (!rows.length) continue;
+      html += `<div class="kg"><div class="kg-title">${esc(g)}</div>`;
+      for (const c of rows) {
+        const keys = keymap.keys(c.id);
+        const chips = keys.map((k) => `<span class="chip"><kbd>${esc(formatCombo(k))}</kbd><button class="chip-x" data-rm="${esc(k)}" title="Remove ${esc(formatCombo(k))}">${icon("x")}</button></span>`).join("");
+        const rec = recording === c.id;
+        html += `<div class="kr${rec ? " rec" : ""}" data-id="${c.id}"><span class="kr-label">${esc(c.label)}</span><span class="kr-keys">${chips}${rec ? `<span class="kr-wait">Press the new keys… (Esc cancels)</span>` : `<button class="btn kr-add" title="Add a shortcut">${keys.length ? "+" : "Add shortcut"}</button>`}</span><button class="btn kr-reset"${keymap.isDefault(c.id) ? " hidden" : ""} title="Back to the default">Reset</button></div>`;
+      }
+      html += `</div>`;
+    }
+    list.innerHTML = html || `<p class="hint">No command matches “${esc(query)}”.</p>`;
+    const n = list.parentNode.querySelector("#keys-note");
+    n.hidden = !note;
+    if (note) n.innerHTML = note.text + (note.undo ? ` <button class="btn link" id="keys-undo">Undo</button>` : "");
+  };
+  const onKey = (e) => {
+    if (!recording) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey) { recording = null; render(); return; }
+    const combo = comboFromEvent(e);
+    if (!combo) return; // a modifier on its own: keep waiting
+    const id = recording;
+    recording = null;
+    const before = JSON.stringify(keymap.overrides);
+    const other = keymap.lookup(combo);
+    if (other && other !== id) keymap.remove(other, combo);
+    keymap.add(id, combo);
+    note = other && other !== id
+      ? { text: `${esc(formatCombo(combo))} now does “${esc(keymap.byId.get(id).label)}”. It no longer does “${esc(keymap.byId.get(other).label)}”.`, undo: before }
+      : { text: `${esc(formatCombo(combo))} now does “${esc(keymap.byId.get(id).label)}”.`, undo: before };
+    changed();
+    render();
+  };
+  window.addEventListener("keydown", onKey, true);
+  return dialog({
+    title: "Keyboard shortcuts",
+    wide: true,
+    html: `<div class="keys-ui">
+      <div class="keys-top"><label class="sb-search">${icon("search")}<input type="search" id="keys-q" placeholder="Find a command or key" spellcheck="false"></label>
+      <button class="btn" id="keys-reset">Reset all</button></div>
+      <p class="keys-note" id="keys-note" hidden></p>
+      <div class="keys-list" id="keys-list"></div>
+      <p class="hint">Always the same: <b>Enter</b> / <b>Esc</b> place or cancel a signature, finish or cancel measuring, and <b>Backspace</b> removes the last measuring point. While typing in a text box, <b>Ctrl+Enter</b> finishes and <b>Esc</b> cancels. <b>Shift</b> while drawing a line or measuring keeps 0°, 45° or 90°.</p></div>`,
+    buttons: [{ id: "ok", label: "Done", primary: true }],
+    onMount(d) {
+      list = d.querySelector("#keys-list");
+      const q = d.querySelector("#keys-q");
+      q.addEventListener("input", () => { query = q.value; render(); });
+      q.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); } });
+      d.querySelector("#keys-reset").onclick = () => {
+        const before = JSON.stringify(keymap.overrides);
+        keymap.resetAll();
+        note = { text: "All shortcuts are back to their defaults.", undo: before };
+        recording = null;
+        changed();
+        render();
+      };
+      d.addEventListener("click", (e) => {
+        if (e.target.closest("#keys-undo") && note?.undo) {
+          keymap.resetAll();
+          Object.assign(keymap.overrides, JSON.parse(note.undo));
+          keymap.rebuild();
+          note = { text: "Change undone." };
+          changed();
+          render();
+          return;
+        }
+        const row = e.target.closest(".kr");
+        if (!row) return;
+        const id = row.dataset.id;
+        const rm = e.target.closest("[data-rm]");
+        if (rm) { keymap.remove(id, rm.dataset.rm); note = null; changed(); render(); }
+        else if (e.target.closest(".kr-add")) { recording = id; note = null; render(); }
+        else if (e.target.closest(".kr-reset")) { keymap.reset(id); note = null; changed(); render(); }
+      });
+      render();
+    },
+  }).finally(() => window.removeEventListener("keydown", onKey, true));
+}
 
 // ------------------------------------------------------------------ drag & drop
 document.addEventListener("dragover", (e) => e.preventDefault());

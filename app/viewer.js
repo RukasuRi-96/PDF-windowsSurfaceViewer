@@ -133,6 +133,7 @@ export class Viewer {
     this.shape = "box";          // box tool: box | line | arrow | cloud | callout | text
     this.textStyle = { size: 12, fillText: false, fillCallout: true };
     this.editor = null;          // text box / callout being typed
+    this.shapeSel = null;        // shape selected for moving / editing
     this.placing = null;         // signature being positioned
     this.placeBar = el("div", "placebar", root);
     this.placeBar.hidden = true;
@@ -209,6 +210,7 @@ export class Viewer {
 
   close() {
     this._closeEditor(false);
+    this.deselectShape();
     this.finishPlacing(false);
     this._stopInertia();
     this.action = null;
@@ -860,6 +862,7 @@ export class Viewer {
       if (this.mdraft || this._calibrating) this.cancelMeasure();
       if (this.sel && tool !== "select") this.clearSelection();
       this._closeEditor(true);
+      this.deselectShape();
       if (this.placing) this.finishPlacing(false);
     }
     this.tool = tool;
@@ -909,6 +912,10 @@ export class Viewer {
     }
     if (type === "mouse" && e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
+    // Working on the page ends typing elsewhere (e.g. the file filter), so
+    // keyboard shortcuts apply to the page again.
+    const ae = document.activeElement;
+    if (ae && ae !== document.body && !this.root.contains(ae) && ae.closest?.("input, textarea, select")) ae.blur();
     this._stopInertia();
     this.rect = this.root.getBoundingClientRect();
     try { this.root.setPointerCapture(e.pointerId); } catch {}
@@ -916,6 +923,9 @@ export class Viewer {
     this.pointers.set(e.pointerId, ptr);
     // Tapping outside a text box being typed finishes it (and does nothing else).
     if (this.editor) { this._closeEditor(true); ptr.ignored = true; return; }
+    // Pen/mouse on the page outside the selected shape lets it go (a finger
+    // still pans; a finger tap deselects).
+    if (this.shapeSel && type !== "touch") this.deselectShape();
 
     if (type === "touch") {
       const n = this._touchCount();
@@ -1045,10 +1055,12 @@ export class Viewer {
   _endPan(a, ptr, cancelled) {
     const t = now();
     const moved = Math.hypot(ptr.x - ptr.x0, ptr.y - ptr.y0);
-    if (!cancelled && !a.resumed && (this.placing || this.tool === "sign") && moved < (ptr.type === "touch" ? 12 : 6) && t - ptr.t0 < 450) {
+    const tapLike = !cancelled && !a.resumed && moved < (ptr.type === "touch" ? 12 : 6) && t - ptr.t0 < 450;
+    if (tapLike && (this.placing || this.tool === "sign")) {
       this._signTap(ptr);
       return;
     }
+    if (tapLike && this.tool === "box" && this._shapeTap(ptr)) return;
     if (!cancelled && !a.resumed && ptr.type === "touch" && moved < 12 && t - ptr.t0 < 300) {
       this._tap(ptr);
       return;
@@ -1431,6 +1443,10 @@ export class Viewer {
     const s = this._state(a.page);
     s.prevInk.textContent = "";
     if (cancel) return;
+    if (!a.moved) {
+      const hit = this._pickShape(a.page, a.start);
+      if (hit) { this.selectShape(a.page, hit); return; }
+    }
     const k = a.shape;
     if (k === "text" || k === "callout") { this._openTextEditor(a); return; }
     if (k === "line" || k === "arrow") {
@@ -1447,6 +1463,18 @@ export class Viewer {
   }
 
   // ---- text boxes and callouts: type straight onto the page
+  // Leader for a callout box: from the tip to the middle of the first line,
+  // on the side of the box facing the tip, with a short horizontal knee.
+  _calloutPts(tip, rect, bw, size) {
+    const [x0, y0, x1] = rect;
+    const left = tip[0] <= (x0 + x1) / 2;
+    const ay = y0 + bw + 1.5 + size * 0.6;
+    const attach = [left ? x0 : x1, ay];
+    const K = Math.min(36, Math.abs(attach[0] - tip[0]) * 0.35);
+    const pts = K >= 2 ? [tip, [attach[0] + (left ? -K : K), ay], attach] : [tip, attach];
+    return pts.map((p) => p.map(round2));
+  }
+
   _openTextEditor(a) {
     const i = a.page, P = this.doc.pages[i], ts = this.textStyle, size = ts.size;
     const callout = a.shape === "callout";
@@ -1462,31 +1490,35 @@ export class Viewer {
       const right = end[0] >= tip[0];
       x = clamp(right ? end[0] : end[0] - W, P.x0, P.x1 - W);
       y = clamp(end[1] - firstMid, P.y0, P.y1 - lineH - 2 * bw - 3);
-      const attach = [right ? x : x + W, y + firstMid];
-      const K = Math.min(36, Math.abs(attach[0] - tip[0]) * 0.35);
-      pts = K >= 2 ? [tip, [attach[0] + (right ? -K : K), attach[1]], attach] : [tip, attach];
-      pts = pts.map((p) => p.map(round2));
+      pts = this._calloutPts(tip.map(round2), [x, y, x + W], bw, size);
     } else {
       const [x0, , x1] = this._boxRect(a);
       W = a.moved && (x1 - x0) >= size * 3 ? x1 - x0 : Math.min(size * 16, P.w * 0.6);
       x = clamp(a.moved ? x0 : a.start[0], P.x0, P.x1 - W);
       y = clamp(a.start[1] - (a.moved ? 0 : firstMid), P.y0, P.y1 - lineH - 3);
     }
-    const s = this._state(i);
+    this._showEditor({ page: i, kind: a.shape, x, y, W, size, bw, fill, color: a.color.slice(), callout: pts, text: "", target: null });
+  }
+
+  // The on-page editor. With `target`, an existing text box/callout is being
+  // retyped (it is hidden meanwhile and updated in place when done).
+  _showEditor(o) {
+    const P = this.doc.pages[o.page], s = this._state(o.page);
     const box = el("div", "text-edit", s.el);
-    box.style.left = ((x - P.x0) / P.w) * 100 + "%";
-    box.style.top = ((y - P.y0) / P.h) * 100 + "%";
-    box.style.width = (W / P.w) * 100 + "%";
+    box.style.left = ((o.x - P.x0) / P.w) * 100 + "%";
+    box.style.top = ((o.y - P.y0) / P.h) * 100 + "%";
+    box.style.width = (o.W / P.w) * 100 + "%";
     const ta = el("textarea", "", box);
     ta.spellcheck = true;
-    ta.placeholder = callout ? "Callout text" : "Type text";
-    const col = cssColor(a.color);
-    ta.style.setProperty("--ts", size + "px");
-    ta.style.setProperty("--tb", bw + "px");
+    ta.placeholder = o.kind === "callout" ? "Callout text" : "Type text";
+    ta.value = o.text || "";
+    const col = cssColor(o.color);
+    ta.style.setProperty("--ts", o.size + "px");
+    ta.style.setProperty("--tb", o.bw + "px");
     ta.style.color = col;
-    ta.style.borderColor = bw ? col : "";
-    ta.classList.toggle("bordered", !!bw);
-    ta.classList.toggle("filled", !!fill.length);
+    ta.style.borderColor = o.bw ? col : "";
+    ta.classList.toggle("bordered", !!o.bw);
+    ta.classList.toggle("filled", !!(o.fill && o.fill.length));
     const bar = el("div", "te-bar", box);
     bar.innerHTML = `<button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="done">Done</button>`;
     box.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -1495,18 +1527,22 @@ export class Viewer {
       if (b) this._closeEditor(b.dataset.act === "done");
     });
     ta.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Escape") { e.preventDefault(); this._closeEditor(false); }
-      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this._closeEditor(true); }
+      // Plain keys stay in the box; Ctrl/Alt/F-key shortcuts (Save…) still work.
+      if (!(e.ctrlKey || e.metaKey || e.altKey || /^F\d+$/.test(e.key))) e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this._closeEditor(false); }
+      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); this._closeEditor(true); }
     });
-    if (pts) {
-      const lw = Math.max(bw, 1);
+    if (o.callout) {
+      const lw = Math.max(o.bw, 1), pts = o.callout;
       const d = "M" + pts.map((p) => p.join(" ")).join("L") + this._arrowHead(pts[1], pts[0], lw);
       svgEl("path", { d, fill: "none", stroke: col, "stroke-width": lw, "stroke-linecap": "round", "stroke-linejoin": "round" }, s.prevInk);
     }
-    this.editor = { page: i, kind: a.shape, x, y, W, size, bw, fill, color: a.color.slice(), callout: pts, el: box, ta };
+    if (o.target) this._nodes.get(o.target)?.setAttribute("visibility", "hidden");
+    this.editor = { ...o, el: box, ta };
     this.cb.onEditing?.(true);
-    setTimeout(() => ta.focus(), 0);
+    // Focus right away so the very next key press goes into the box.
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
   }
 
   get editing() { return !!this.editor; }
@@ -1518,14 +1554,282 @@ export class Viewer {
     E.el.remove();
     const s = this.doc?.states.get(E.page);
     if (s) s.prevInk.textContent = "";
+    if (E.target) this._nodes.get(E.target)?.removeAttribute("visibility");
     this.cb.onEditing?.(false);
+    if (!commit || !this.doc) return;
     const text = E.ta.value.replace(/\s+$/, "");
-    if (!commit || !text.trim() || !this.doc) return;
     const lines = text.split("\n").length;
     const rect = [E.x, E.y, E.x + E.W, E.y + lines * E.size * 1.2 + 2 * E.bw + 3].map(round2);
+    if (E.target) {
+      const d = E.target;
+      if (!text.trim()) {
+        // Emptied: remove it (one undo brings it back).
+        this._removeAnnot(E.page, d);
+        this._pushHistory([{ op: "del", page: E.page, data: d }]);
+      } else if (text !== d.text) {
+        this._updateShape(E.page, d, { ...this._snap(d), text, rect });
+      }
+      return;
+    }
+    if (!text.trim()) return;
     const d = { type: "FreeText", shape: { k: E.kind }, text, size: E.size, color: E.color, fill: E.fill, width: E.bw, rect, opacity: 1 };
     if (E.callout) d.callout = E.callout;
     this._commitAdd(E.page, d);
+  }
+
+  // ---- selecting, moving and reshaping shapes (Shapes tool)
+  // Tap a shape to select it. Drag it to move; drag the handles to resize a
+  // box or cloud, move a line's ends or re-point a callout. Tap a selected
+  // text box or callout (or "Edit text") to retype it. Changes are made to the
+  // same annotation in place, one undo step each.
+  _movable(d) {
+    return !!((d.shape && d.shape.k !== "sig") || (d.type === "Square" && !d.measure && d.rect));
+  }
+
+  _kindOf(d) { return d.shape ? d.shape.k : "box"; }
+
+  _pickShape(i, p) {
+    const tol = 8 / this.scale;
+    const list = this.doc.annots.get(i) || [];
+    for (let k = list.length - 1; k >= 0; k--) {
+      const d = list[k];
+      if (!this._movable(d)) continue;
+      const kind = this._kindOf(d);
+      if (kind === "box" || kind === "cloud") {
+        const r = d.rect;
+        if (p[0] >= r[0] - tol && p[0] <= r[2] + tol && p[1] >= r[1] - tol && p[1] <= r[3] + tol) return d;
+      } else if (this._hitAnnot(d, p, tol)) return d;
+    }
+    return null;
+  }
+
+  _shapeTap(ptr) {
+    const [wx, wy] = this._toWorld(ptr.x, ptr.y);
+    const i = this._hitPage(wx, wy, 0);
+    const d = i >= 0 ? this._pickShape(i, this._worldToPage(i, wx, wy)) : null;
+    if (d) {
+      if (this.shapeSel && this.shapeSel.d === d) this.editSelectedText();
+      else this.selectShape(i, d);
+      return true;
+    }
+    if (this.shapeSel) { this.deselectShape(); return true; }
+    return false;
+  }
+
+  _snap(d) {
+    const g = {};
+    for (const k of ["pts", "rect", "text", "size", "color", "fill", "width", "callout"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
+    return g;
+  }
+
+  // Change a shape (one undo step).
+  _updateShape(i, d, after) {
+    const before = this._snap(d);
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    this._applySnap(i, d, after);
+    this._pushHistory([{ op: "upd", page: i, data: d, before, after }]);
+  }
+
+  _applySnap(i, d, snap) {
+    Object.assign(d, JSON.parse(JSON.stringify(snap)));
+    if (d.shape) d.svg = null;
+    this._redrawAnnot(i, d);
+    if (this.shapeSel && this.shapeSel.d === d) this._renderShapeSel();
+    this.engine.updateAnnot(i, () => d.id, () => this._payload(d), d)
+      .then(() => {
+        this._annotReady(d);
+        if (this.shapeSel && this.shapeSel.d === d) this._renderShapeSel();
+      })
+      .catch((err) => this.cb.onError?.("Couldn't change that markup: " + err.message));
+  }
+
+  _redrawAnnot(i, d) {
+    this._nodes.get(d)?.remove();
+    this._nodes.delete(d);
+    this._drawAnnot(i, d);
+  }
+
+  get selectedShape() { return this.shapeSel ? this._kindOf(this.shapeSel.d) : null; }
+
+  selectShape(i, d) {
+    this.deselectShape();
+    this.shapeSel = { page: i, d, el: null, geo: null };
+    this._renderShapeSel();
+    this.cb.onShapeSelect?.(this._kindOf(d), d);
+  }
+
+  deselectShape() {
+    const S = this.shapeSel;
+    if (!S) return;
+    this.shapeSel = null;
+    S.el?.remove();
+    const s = this.doc?.states.get(S.page);
+    if (s && S.geo) { s.prevInk.textContent = ""; this._nodes.get(S.d)?.removeAttribute("visibility"); }
+    this.cb.onShapeSelect?.(null, null);
+  }
+
+  deleteSelectedShape() {
+    const S = this.shapeSel;
+    if (!S) return;
+    this.deselectShape();
+    this._removeAnnot(S.page, S.d);
+    this._pushHistory([{ op: "del", page: S.page, data: S.d }]);
+  }
+
+  editSelectedText() {
+    const S = this.shapeSel;
+    if (!S) return;
+    const d = S.d, k = this._kindOf(d);
+    if (k !== "text" && k !== "callout") return;
+    this.deselectShape();
+    const [x0, y0, x1] = d.rect;
+    this._showEditor({ page: S.page, kind: k, x: x0, y: y0, W: x1 - x0, size: d.size, bw: d.width || 0, fill: d.fill || [], color: d.color, callout: d.callout || null, text: d.text, target: d });
+  }
+
+  // Recolour / re-size the selected shape from the shapes menu.
+  restyleSelected(style) {
+    const S = this.shapeSel;
+    if (!S) return false;
+    const d = S.d, k = this._kindOf(d), g = this._snap(d), isText = k === "text" || k === "callout";
+    if (style.color) g.color = style.color.slice();
+    if (style.width != null && k !== "text") g.width = k === "callout" ? Math.min(2, style.width) : style.width;
+    if (isText && style.size) g.size = style.size;
+    if (isText && style.fill != null) g.fill = style.fill ? [1, 1, 1] : [];
+    if (k === "callout" && g.callout) g.callout = this._calloutPts(g.callout[0], g.rect, g.width || 0, g.size);
+    this._updateShape(S.page, d, g);
+    return true;
+  }
+
+  _selBox(g, kind) {
+    if (kind === "line" || kind === "arrow") {
+      const [a, b] = g.pts, m = Math.max(6 / this.scale, (g.width || 1) * 1.5);
+      return [Math.min(a[0], b[0]) - m, Math.min(a[1], b[1]) - m, Math.max(a[0], b[0]) + m, Math.max(a[1], b[1]) + m];
+    }
+    return g.rect;
+  }
+
+  _renderShapeSel() {
+    const S = this.shapeSel;
+    if (!S || !this.doc) return;
+    const i = S.page, P = this.doc.pages[i], s = this._state(i), d = S.d, kind = this._kindOf(d);
+    const g = S.geo || this._snap(d);
+    const pct = (el, x, y) => { el.style.left = ((x - P.x0) / P.w) * 100 + "%"; el.style.top = ((y - P.y0) / P.h) * 100 + "%"; };
+    if (!S.el || S.el.parentNode !== s.el) {
+      S.el?.remove();
+      S.el = el("div", "shape-sel", s.el);
+      const frame = el("div", "ss-frame", S.el);
+      frame.dataset.role = "move";
+      const roles = kind === "box" || kind === "cloud" ? ["nw", "ne", "sw", "se"] : kind === "line" || kind === "arrow" ? ["p0", "p1"] : kind === "callout" ? ["tip"] : [];
+      for (const r of roles) { const h = el("div", "ss-h " + r, S.el); h.dataset.role = r; }
+      const bar = el("div", "ss-bar", S.el);
+      bar.innerHTML = (kind === "text" || kind === "callout" ? `<button class="btn" data-act="edit">Edit text</button>` : "") + `<button class="btn" data-act="delete">Delete</button>`;
+      bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+      bar.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-act]");
+        if (b?.dataset.act === "edit") this.editSelectedText();
+        else if (b?.dataset.act === "delete") this.deleteSelectedShape();
+      });
+      S.el.addEventListener("pointerdown", (e) => this._selDown(e));
+      this.cb.onDecorate?.(bar);
+    }
+    const [x0, y0, x1, y1] = this._selBox(g, kind);
+    const frame = S.el.querySelector(".ss-frame");
+    pct(frame, x0, y0);
+    frame.style.width = ((x1 - x0) / P.w) * 100 + "%";
+    frame.style.height = ((y1 - y0) / P.h) * 100 + "%";
+    frame.classList.toggle("line", kind === "line" || kind === "arrow");
+    for (const h of S.el.querySelectorAll(".ss-h")) {
+      const r = h.dataset.role;
+      if (r === "p0" || r === "p1") pct(h, ...g.pts[r === "p0" ? 0 : 1]);
+      else if (r === "tip") pct(h, ...g.callout[0]);
+      else pct(h, r.includes("w") ? g.rect[0] : g.rect[2], r.includes("n") ? g.rect[1] : g.rect[3]);
+    }
+    const bar = S.el.querySelector(".ss-bar");
+    pct(bar, x0, y0);
+    bar.classList.toggle("below", (y0 - P.y0) * this.scale < 56);
+    if (bar.classList.contains("below")) pct(bar, x0, y1);
+  }
+
+  // Geometry while dragging part of the selected shape.
+  _dragGeo(S, g0, role, dx, dy, shift) {
+    const P = this.doc.pages[S.page], kind = this._kindOf(S.d);
+    const g = JSON.parse(JSON.stringify(g0));
+    if (role === "move") {
+      const [bx0, by0, bx1, by1] = kind === "line" || kind === "arrow"
+        ? [Math.min(g0.pts[0][0], g0.pts[1][0]), Math.min(g0.pts[0][1], g0.pts[1][1]), Math.max(g0.pts[0][0], g0.pts[1][0]), Math.max(g0.pts[0][1], g0.pts[1][1])]
+        : g0.rect;
+      dx = clamp(dx, P.x0 - bx0, P.x1 - bx1);
+      dy = clamp(dy, P.y0 - by0, P.y1 - by1);
+      if (g.pts) g.pts = g0.pts.map((p) => [round2(p[0] + dx), round2(p[1] + dy)]);
+      if (g.rect) g.rect = [g0.rect[0] + dx, g0.rect[1] + dy, g0.rect[2] + dx, g0.rect[3] + dy].map(round2);
+      if (kind === "callout") g.callout = this._calloutPts(g0.callout[0], g.rect, g.width || 0, g.size);
+    } else if (role === "p0" || role === "p1") {
+      const k = role === "p0" ? 0 : 1;
+      let q = this._clampToPage(S.page, [g0.pts[k][0] + dx, g0.pts[k][1] + dy]);
+      if (shift) q = this._snap45(S.page, g0.pts[1 - k], q);
+      g.pts[k] = q.map(round2);
+    } else if (role === "tip") {
+      const tip = this._clampToPage(S.page, [g0.callout[0][0] + dx, g0.callout[0][1] + dy]);
+      g.callout = this._calloutPts(tip, g.rect, g.width || 0, g.size);
+    } else {
+      // A corner of a box or cloud: resize from the opposite corner.
+      const r = g0.rect, min = Math.max(6, 12 / this.scale);
+      const ax = role.includes("w") ? r[2] : r[0], ay = role.includes("n") ? r[3] : r[1];
+      let px = clamp((role.includes("w") ? r[0] : r[2]) + dx, P.x0, P.x1);
+      let py = clamp((role.includes("n") ? r[1] : r[3]) + dy, P.y0, P.y1);
+      if (Math.abs(px - ax) < min) px = ax + (role.includes("w") ? -min : min);
+      if (Math.abs(py - ay) < min) py = ay + (role.includes("n") ? -min : min);
+      g.rect = [Math.min(ax, px), Math.min(ay, py), Math.max(ax, px), Math.max(ay, py)].map(round2);
+    }
+    return g;
+  }
+
+  _selDown(e) {
+    const S = this.shapeSel;
+    const t = e.target.closest("[data-role]");
+    if (!S || !t) return;
+    e.stopPropagation();
+    e.preventDefault();
+    if (e.pointerType === "touch" && now() - this.lastPen < PALM_MS) return;
+    if (e.pointerType === "pen") this.lastPen = now();
+    const role = t.dataset.role, i = S.page, d = S.d, kind = this._kindOf(d);
+    try { t.setPointerCapture(e.pointerId); } catch {}
+    const sx = e.clientX, sy = e.clientY, t0 = now(), g0 = this._snap(d);
+    let moved = false;
+    const move = (ev) => {
+      if (ev.pointerId !== e.pointerId || this.shapeSel !== S) return;
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      moved = true;
+      S.geo = this._dragGeo(S, g0, role, (ev.clientX - sx) / this.scale, (ev.clientY - sy) / this.scale, ev.shiftKey);
+      // Live preview: hide the shape and draw a stand-in at the new place.
+      const s = this._state(i);
+      this._nodes.get(d)?.setAttribute("visibility", "hidden");
+      s.prevInk.textContent = "";
+      const tmp = { ...d, ...S.geo, svg: null };
+      s.prevInk.appendChild(d.shape ? this._shapeNode(tmp) : svgEl("rect", { x: tmp.rect[0] + tmp.width / 2, y: tmp.rect[1] + tmp.width / 2, width: tmp.rect[2] - tmp.rect[0] - tmp.width, height: tmp.rect[3] - tmp.rect[1] - tmp.width, fill: "none", stroke: cssColor(tmp.color), "stroke-width": tmp.width }));
+      this._renderShapeSel();
+    };
+    const up = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      t.removeEventListener("pointermove", move);
+      t.removeEventListener("pointerup", up);
+      t.removeEventListener("pointercancel", up);
+      if (this.shapeSel !== S) return;
+      if (!moved) {
+        // A tap on a selected text box or callout opens it for typing.
+        if (ev.type === "pointerup" && role === "move" && now() - t0 < 500 && (kind === "text" || kind === "callout")) this.editSelectedText();
+        return;
+      }
+      const after = S.geo;
+      S.geo = null;
+      this._state(i).prevInk.textContent = "";
+      if (ev.type === "pointercancel") { this._nodes.get(d)?.removeAttribute("visibility"); this._renderShapeSel(); return; }
+      this._updateShape(i, d, after);
+      this._renderShapeSel();
+    };
+    t.addEventListener("pointermove", move);
+    t.addEventListener("pointerup", up);
+    t.addEventListener("pointercancel", up);
   }
 
   // Finish typing (e.g. before saving).
@@ -2329,6 +2633,7 @@ export class Viewer {
   }
 
   _removeAnnot(i, d) {
+    if (this.shapeSel && this.shapeSel.d === d) this.deselectShape();
     const list = this.doc.annots.get(i);
     const k = list ? list.indexOf(d) : -1;
     if (k >= 0) list.splice(k, 1);
@@ -2354,6 +2659,7 @@ export class Viewer {
   _apply(ops, inverse) {
     const list = inverse ? ops.slice().reverse() : ops;
     for (const o of list) {
+      if (o.op === "upd") { this._applySnap(o.page, o.data, inverse ? o.before : o.after); continue; }
       const add = (o.op === "add") !== inverse;
       if (add) this._insertAnnot(o.page, o.data);
       else this._removeAnnot(o.page, o.data);
@@ -2364,6 +2670,7 @@ export class Viewer {
     const d = this.doc;
     if (this.editor) { this._closeEditor(false); return; }
     if (this.placing) { this.finishPlacing(false); return; }
+    this.deselectShape();
     if (!d || this.action || !d.undo.length) return;
     const h = d.undo.pop();
     this._apply(h.ops, true);
@@ -2373,6 +2680,7 @@ export class Viewer {
 
   redo() {
     const d = this.doc;
+    this.deselectShape();
     if (!d || this.action || !d.redo.length) return;
     const h = d.redo.pop();
     this._apply(h.ops, false);

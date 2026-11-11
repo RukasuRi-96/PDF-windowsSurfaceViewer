@@ -162,6 +162,21 @@ export class Engine {
       return r;
     });
   }
+  // Change a shape in place (same annotation, so replies etc. stay attached).
+  updateAnnot(page, getId, data, target) {
+    return this._edit(async () => {
+      const id = typeof getId === "function" ? getId() : getId;
+      if (!id) return null;
+      const payload = typeof data === "function" ? data() : data;
+      const r = await this.edit.call("updateAnnot", { page, id, data: payload });
+      if (target && r) {
+        if (r.svg) target.svg = r.svg;
+        if (r.bounds) target.bounds = r.bounds;
+        if (r.rect) target.rect = r.rect;
+      }
+      return r;
+    });
+  }
   // Transparent PNG of a signature stamp (null if it no longer exists).
   annotImage(page, getId) {
     return this._edit(() => {
