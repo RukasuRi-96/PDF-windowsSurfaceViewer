@@ -5,6 +5,12 @@ import * as mupdf from "./vendor/mupdf/mupdf.js";
 import { UNITS } from "./measure.js";
 
 const PDFAnnotation = mupdf.PDFAnnotation;
+// MuPDF notes when it re-embeds a font that has no character map of its own;
+// Inkleaf writes that map itself, so that note is only noise.
+mupdf.setLog({
+  error: (m) => console.error("mupdf: " + m),
+  warning: (m) => { if (!/cannot create ToUnicode mapping/.test(m)) console.warn("mupdf: " + m); },
+});
 const MANAGED_TYPES = new Set(["Ink", "Square", "Highlight", "Line", "PolyLine", "Polygon"]);
 // Line/PolyLine/Polygon are only managed when Inkleaf created them as
 // measurements (marked with this key); anyone else's are left to MuPDF.
@@ -159,11 +165,14 @@ function colorOf(c) {
 // coordinates. Element ids get a unique prefix so many can share one page.
 let svgSeq = 0;
 function annotSvg(a) {
+  return drawSvg(a.getBounds(), (dev) => a.run(dev, mupdf.Matrix.identity));
+}
+function drawSvg(bounds, draw) {
   const buf = new mupdf.Buffer();
   try {
     const w = new mupdf.DocumentWriter(buf, "svg", "text=path");
-    const dev = w.beginPage(a.getBounds());
-    try { a.run(dev, mupdf.Matrix.identity); } finally { w.endPage(); w.close(); }
+    const dev = w.beginPage(bounds);
+    try { draw(dev); } finally { w.endPage(); w.close(); }
     let s = buf.asString();
     s = s.slice(s.indexOf(">", s.indexOf("<svg")) + 1, s.lastIndexOf("</svg>"));
     const p = "a" + (++svgSeq) + "_";
@@ -195,6 +204,11 @@ function shapeData(a, type, shape, d) {
     if (shape.k === "callout" && Array.isArray(shape.pts)) d.callout = shape.pts;
   } else if (type === "Stamp" || type === "Redact") {
     d.rect = Array.from(a.getRect());
+  }
+  if (shape.k === "retext") {
+    Object.assign(d, { text: shape.text, size: shape.size, color: shape.color, origin: shape.origin, erase: shape.erase, face: shape.face });
+    const F = fontCache.get(shape.fkey);
+    d.svg = F ? retextSvg(d.rect, shape, F) : null;
   }
   return d;
 }
@@ -375,46 +389,327 @@ function updateShape(p, id, data) {
   return finishShape(a, k, data, info);
 }
 
-// Permanently remove what's under Inkleaf's "erase area" boxes: text,
-// covered vector art and image pixels (redaction), then paint the areas
-// white so partly covered lines leave no traces. Returns how many.
-const isEraseArea = (o) => {
-  try {
-    if (o.get("Subtype").asName() !== "Redact") return false;
-    const v = o.get(SHAPE_KEY);
-    return !!v && v.isString() && JSON.parse(v.asString()).k === "redact";
-  } catch { return false; }
+// ---- edited lines of page text ("retext") --------------------------------
+// Retyping a line of the page's text makes one "retext" item: the old line's
+// box (whited out) plus the new text, set in the same font, size, colour and
+// baseline. Until saving it is an annotation drawn from our own glyph layout;
+// saving writes it into the page as real text (searchable, editable again).
+//
+// The font, in order of preference:
+//   1. the document's own embedded font, when every letter of the new text is
+//      already drawn with it on the page (so the glyphs are sure to exist);
+//   2. the same font installed on this computer (found by name);
+//   3. the nearest standard PDF font (Helvetica, Times, Courier; bold/italic).
+const fontCache = new Map(); // key -> { font, gidOf, spaceGid, spaceEm, full }
+let scratchDoc = null;
+const B14 = {
+  sans: ["Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique"],
+  serif: ["Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic"],
+  mono: ["Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique"],
 };
-function applyInkleafRedactions(d) {
+
+// Glyphs each font draws on a page (visible text only): unicode -> glyph id.
+function pageGlyphs(i) {
+  const e = entry(i);
+  if (e.glyphs) return e.glyphs;
+  const map = new Map();
+  const collect = (text) => {
+    text.walk({
+      showGlyph(font, trm, gid, uni) {
+        const k = "p" + font.pointer;
+        let g = map.get(k);
+        if (!g) { g = { font, map: new Map() }; map.set(k, g); }
+        if (uni > 0 && gid > 0 && !g.map.has(uni)) g.map.set(uni, gid);
+      },
+    });
+  };
+  const dev = new mupdf.Device({ fillText: collect, strokeText: collect });
+  try { e.page.runPageContents(dev, mupdf.Matrix.identity); } catch {} finally { try { dev.close(); } catch {} }
+  e.glyphs = map;
+  return map;
+}
+
+// Can this font be embedded again (not a Type 3 or otherwise odd font)?
+function embeddable(font) {
+  try {
+    if (/glyphless/i.test(font.getName())) return false;
+    scratchDoc ||= new mupdf.PDFDocument();
+    scratchDoc.addFont(font);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const sysEntry = (font, full) => ({ font, gidOf: (u) => font.encodeCharacter(u), spaceGid: font.encodeCharacter(32), spaceEm: 0, full });
+
+async function resolveFace(page, face, text) {
+  const need = [...text].filter((ch) => !/\s/.test(ch)).map((ch) => ch.codePointAt(0));
+  const g = face.key && pageGlyphs(page).get(face.key);
+  if (g && need.every((u) => g.map.has(u))) {
+    const key = "page:" + face.key;
+    if (!fontCache.has(key) && embeddable(g.font)) {
+      fontCache.set(key, { font: g.font, gidOf: (u) => g.map.get(u) || 0, spaceGid: g.map.get(32) || 0, spaceEm: face.spaceEm || 0, full: false });
+    }
+    if (fontCache.has(key)) return key;
+  }
+  if (face.url && face.file) {
+    const key = "sys:" + face.file + "#" + (face.index || 0);
+    if (!fontCache.has(key)) {
+      try {
+        const r = await fetch(face.url);
+        if (r.ok) fontCache.set(key, sysEntry(new mupdf.Font(face.ps || face.name || "Font", new Uint8Array(await r.arrayBuffer()), face.index || 0), true));
+      } catch {}
+    }
+    if (fontCache.has(key)) return key;
+  }
+  const name = B14[face.mono ? "mono" : face.serif ? "serif" : "sans"][(face.bold ? 1 : 0) + (face.italic ? 2 : 0)];
+  const key = "b14:" + name;
+  if (!fontCache.has(key)) fontCache.set(key, sysEntry(new mupdf.Font(name), true));
+  return key;
+}
+
+// Glyph runs (one per word) from the baseline origin, and the text's box.
+function layoutRetext(info, F) {
+  const size = info.size, lh = size * 1.2, o = info.origin;
+  const spaceEm = (F.spaceGid && F.font.advanceGlyph(F.spaceGid)) || F.spaceEm || (info.face && info.face.spaceEm) || 0.25;
+  const runs = [];
+  const lines = info.text.split("\n");
+  let maxX = o[0];
+  lines.forEach((line, j) => {
+    let x = o[0], cur = null;
+    const y = o[1] + j * lh;
+    for (const ch of line) {
+      if (/\s/.test(ch)) { x += spaceEm * size * (ch === "\t" ? 4 : 1); cur = null; continue; }
+      const u = ch.codePointAt(0), gid = F.gidOf(u) || 0;
+      if (!cur) { cur = { x: r2(x), y: r2(y), g: [], u: [] }; runs.push(cur); }
+      cur.g.push(gid);
+      cur.u.push(u);
+      x += F.font.advanceGlyph(gid) * size;
+    }
+    maxX = Math.max(maxX, x);
+  });
+  return { runs, box: [o[0], o[1] - size * 0.95, Math.max(maxX, o[0] + size * 0.3), o[1] + (lines.length - 1) * lh + size * 0.3] };
+}
+const r2 = (v) => Math.round(v * 100) / 100;
+
+function rectPath(r) {
+  const p = new mupdf.Path();
+  p.moveTo(r[0], r[1]); p.lineTo(r[2], r[1]); p.lineTo(r[2], r[3]); p.lineTo(r[0], r[3]); p.closePath();
+  return p;
+}
+
+function retextSvg(rect, info, F) {
+  return drawSvg(rect, (dev) => {
+    if (info.erase) dev.fillPath(rectPath(info.erase), false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, [1, 1, 1], 1);
+    if (!info.runs || !info.runs.length) return;
+    const t = new mupdf.Text(), s = info.size;
+    for (const r of info.runs) {
+      let x = r.x;
+      r.g.forEach((gid, k) => { t.showGlyph(F.font, [s, 0, 0, -s, x, r.y], gid, r.u[k]); x += F.font.advanceGlyph(gid) * s; });
+    }
+    dev.fillText(t, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, info.color && info.color.length === 3 ? info.color : [0, 0, 0], 1);
+  });
+}
+
+async function retextInfo(page, data) {
+  const face = data.face || {};
+  const fkey = await resolveFace(page, face, data.text || "");
+  const F = fontCache.get(fkey);
+  const store = { v: 1, k: "retext", text: data.text || "", size: data.size, color: data.color, origin: data.origin, erase: data.erase, face, fkey };
+  const { runs, box } = layoutRetext(store, F);
+  store.runs = runs;
+  const e = data.erase;
+  const rect = (runs.length ? [Math.min(e[0], box[0]), Math.min(e[1], box[1]), Math.max(e[2], box[2]), Math.max(e[3], box[3])] : e.slice()).map(r2);
+  return { store, rect, svg: retextSvg(rect, store, F) };
+}
+
+async function createRetext(p, page, data) {
+  const R = await retextInfo(page, data);
+  const a = p.createAnnotation("Redact");
+  a.setRect(R.rect);
+  a.getObject().put(SHAPE_KEY, doc.newString(JSON.stringify(R.store)));
+  if (author) { try { a.setAuthor(author); } catch {} }
+  a.update();
+  return { id: a.getObject().asIndirect(), bounds: R.rect, rect: R.rect, svg: R.svg };
+}
+
+async function updateRetext(p, page, id, data) {
+  const a = findAnnot(p, id);
+  if (!a) throw new Error("That edit is no longer in the document");
+  const R = await retextInfo(page, data);
+  a.setRect(R.rect);
+  a.getObject().put(SHAPE_KEY, doc.newString(JSON.stringify(R.store)));
+  a.update();
+  return { id, bounds: R.rect, rect: R.rect, svg: R.svg };
+}
+
+// ---- applying erase areas and edited lines (when saving) -------------------
+const REDACT = [0, mupdf.PDFPage.REDACT_IMAGE_PIXELS, mupdf.PDFPage.REDACT_LINE_ART_REMOVE_IF_COVERED, mupdf.PDFPage.REDACT_TEXT_REMOVE];
+const subtypeOf = (o) => { try { return o.get("Subtype").asName(); } catch { return ""; } };
+const contentKind = (o) => {
+  try {
+    if (subtypeOf(o) !== "Redact") return null;
+    const v = o.get(SHAPE_KEY);
+    if (!v || !v.isString()) return null;
+    const k = JSON.parse(v.asString()).k;
+    return k === "redact" || k === "retext" ? k : null;
+  } catch { return null; }
+};
+function pdfRect(o) {
+  try {
+    const r = o.get("Rect"), v = [0, 1, 2, 3].map((k) => r.get(k).asNumber());
+    return [Math.min(v[0], v[2]), Math.min(v[1], v[3]), Math.max(v[0], v[2]), Math.max(v[1], v[3])];
+  } catch { return null; }
+}
+// Share of `r` lying inside `by`.
+function coverage(r, by) {
+  const w = Math.min(r[2], by[2]) - Math.max(r[0], by[0]), h = Math.min(r[3], by[3]) - Math.max(r[1], by[1]);
+  const a = Math.max(1e-6, (r[2] - r[0]) * (r[3] - r[1]));
+  return w > 0 && h > 0 ? (w * h) / a : 0;
+}
+
+// Applies every erase area and edited line, page by page in the order they
+// were made: what an erase area covers is removed for good (text, line art,
+// image pixels, and markups made before it that lie mostly inside it), and
+// edited lines become real page text. Returns how many were applied.
+function applyContentEdits(d) {
   let count = 0;
+  const fonts = new Map(); // font key -> { obj, uni: Map<gid, unicode>, names: Map<page, name> }
   for (let i = 0; i < d.countPages(); i++) {
     const pobj = d.findPage(i);
     const annots = pobj.get("Annots");
     if (!annots || !annots.isArray() || !annots.length) continue;
-    const mine = [], others = [];
-    for (let k = 0; k < annots.length; k++) { const o = annots.get(k); (isEraseArea(o) ? mine : others).push(o); }
+    const items = [];
+    for (let k = 0; k < annots.length; k++) { const o = annots.get(k); items.push({ o, k, kind: contentKind(o) }); }
+    const mine = items.filter((x) => x.kind);
     if (!mine.length) continue;
-    // MuPDF's redaction also deletes annotations under the areas. Erase areas
-    // only remove page content, so the other markups are kept out of its reach.
+    const gone = new Set();
+    for (const m of mine) {
+      if (m.kind !== "redact") continue;
+      const er = pdfRect(m.o);
+      if (!er) continue;
+      for (const x of items) {
+        if (x.k >= m.k || x.kind || gone.has(x)) continue;
+        const st = subtypeOf(x.o);
+        if (st === "Widget" || st === "Popup") continue;
+        const r = pdfRect(x.o);
+        if (r && coverage(r, er) >= 0.5) gone.add(x);
+      }
+    }
+    if (gone.size) {
+      const nums = new Set([...gone].map((x) => x.o.asIndirect()));
+      for (const x of items) if (subtypeOf(x.o) === "Popup" && nums.has(x.o.get("Parent").asIndirect())) gone.add(x);
+    }
+    // MuPDF's redaction also deletes annotations under the areas, so the
+    // markups are kept out of its reach while the edits are applied.
     const only = d.newArray();
-    for (const o of mine) only.push(o);
+    for (const m of mine) only.push(m.o);
     pobj.put("Annots", only);
     const page = d.loadPage(i);
-    const rects = [];
     for (const a of page.getAnnotations()) {
-      if (a.getType() !== "Redact") continue;
-      rects.push(Array.from(a.getRect()));
-      a.applyRedaction(0, mupdf.PDFPage.REDACT_IMAGE_PIXELS, mupdf.PDFPage.REDACT_LINE_ART_REMOVE_IF_COVERED, mupdf.PDFPage.REDACT_TEXT_REMOVE);
-      count++;
+      const info = shapeInfo(a);
+      if (!info) continue;
+      if (info.k === "redact") {
+        const r = Array.from(a.getRect());
+        a.applyRedaction(...REDACT);
+        whiteout(d, page, [r]);
+        count++;
+      } else if (info.k === "retext") {
+        if (Array.isArray(info.erase)) {
+          const t = page.createAnnotation("Redact");
+          t.setRect(info.erase);
+          t.update();
+          t.applyRedaction(...REDACT);
+          whiteout(d, page, [info.erase]);
+        }
+        if (info.runs && info.runs.length) writeRuns(d, page, i, info, fonts);
+        count++;
+      }
     }
-    whiteout(d, page, rects);
     page.destroy();
-    const left = pobj.get("Annots"), arr = d.newArray();
-    if (left && left.isArray()) for (let k = 0; k < left.length; k++) if (!isEraseArea(left.get(k))) arr.push(left.get(k));
-    for (const o of others) arr.push(o);
+    const arr = d.newArray(), left = pobj.get("Annots");
+    if (left && left.isArray()) for (let k = 0; k < left.length; k++) if (!contentKind(left.get(k))) arr.push(left.get(k));
+    for (const x of items) if (!x.kind && !gone.has(x)) arr.push(x.o);
     pobj.put("Annots", arr);
   }
+  // A ToUnicode map for each font we added, so the new text can be searched,
+  // copied and edited again.
+  for (const f of fonts.values()) f.obj.put("ToUnicode", d.addStream(toUnicodeCMap(f.uni), {}));
+  // Whole installed fonts were embedded: keep only the letters used. (Not
+  // in forms, whose fields may need any letter when filled in later.)
+  if ([...fonts.values()].some((f) => f.full) && !hasFormFields(d)) { try { d.subsetFonts(); } catch {} }
   return count;
+}
+
+function hasFormFields(d) {
+  try {
+    const f = d.getTrailer().get("Root").get("AcroForm").get("Fields");
+    return f.isArray() && f.length > 0;
+  } catch { return false; }
+}
+
+function writeRuns(d, page, i, info, fonts) {
+  const F = fontCache.get(info.fkey);
+  if (!F) return;
+  let f = fonts.get(info.fkey);
+  if (!f) { f = { obj: d.addFont(F.font), uni: new Map(), names: new Map(), full: F.full }; fonts.set(info.fkey, f); }
+  const pobj = page.getObject();
+  let res = pobj.get("Resources");
+  if (!res.isDictionary()) {
+    const inh = pobj.getInheritable("Resources");
+    res = d.newDictionary();
+    if (inh.isDictionary()) inh.forEach((v, k) => res.put(k, v));
+    pobj.put("Resources", res);
+  }
+  let fd = res.get("Font");
+  if (!fd.isDictionary()) { fd = d.newDictionary(); res.put("Font", fd); }
+  let name = f.names.get(i);
+  if (!name) {
+    let n = 0;
+    while (!fd.get("IkF" + n).isNull()) n++;
+    name = "IkF" + n;
+    fd.put(name, f.obj);
+    f.names.set(i, name);
+  }
+  const inv = mupdf.Matrix.invert(page.getTransform());
+  const num = (v) => String(Math.round(v * 10000) / 10000);
+  const c = info.color && info.color.length === 3 ? info.color : [0, 0, 0];
+  let ops = `q BT ${c.map(num).join(" ")} rg /${name} ${num(info.size)} Tf\n`;
+  for (const r of info.runs) {
+    const m = mupdf.Matrix.concat([1, 0, 0, -1, r.x, r.y], inv);
+    ops += `${m.map(num).join(" ")} Tm <${r.g.map((g) => g.toString(16).padStart(4, "0")).join("")}> Tj\n`;
+    r.g.forEach((g, k) => { if (g) f.uni.set(g, r.u[k]); });
+  }
+  ops += "ET Q\n";
+  appendContent(d, pobj, ops);
+}
+
+function toUnicodeCMap(uni) {
+  const utf16 = (u) => {
+    if (u < 0x10000) return u.toString(16).padStart(4, "0");
+    const v = u - 0x10000;
+    return (0xd800 + (v >> 10)).toString(16) + (0xdc00 + (v & 0x3ff)).toString(16);
+  };
+  const ent = [...uni.entries()].sort((a, b) => a[0] - b[0]);
+  let s = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n";
+  for (let k = 0; k < ent.length; k += 100) {
+    const part = ent.slice(k, k + 100);
+    s += `${part.length} beginbfchar\n` + part.map(([g, u]) => `<${g.toString(16).padStart(4, "0")}> <${utf16(u)}>`).join("\n") + "\nendbfchar\n";
+  }
+  return s + "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+}
+
+// Add content on top of the page, after wrapping what's there in q/Q so
+// its leftover graphics state can't move or recolour ours.
+function appendContent(d, pobj, ops) {
+  const old = pobj.get("Contents");
+  const arr = d.newArray();
+  arr.push(d.addStream("q\n", {}));
+  if (old.isArray()) for (let k = 0; k < old.length; k++) arr.push(old.get(k));
+  else if (!old.isNull()) arr.push(old);
+  arr.push(d.addStream("Q\n" + ops, {}));
+  pobj.put("Contents", arr);
 }
 
 function whiteout(d, page, rects) {
@@ -424,17 +719,7 @@ function whiteout(d, page, rects) {
     const R = mupdf.Rect.transform(r, inv);
     ops += `${R[0].toFixed(3)} ${R[1].toFixed(3)} ${(R[2] - R[0]).toFixed(3)} ${(R[3] - R[1]).toFixed(3)} re\n`;
   }
-  ops += "f Q\n";
-  // Wrap the existing content in q/Q so its leftover graphics state can't
-  // move our rectangles.
-  const pobj = page.getObject();
-  const old = pobj.get("Contents");
-  const arr = d.newArray();
-  arr.push(d.addStream("q\n", {}));
-  if (old && old.isArray()) for (let k = 0; k < old.length; k++) arr.push(old.get(k));
-  else if (old) arr.push(old);
-  arr.push(d.addStream("Q\n" + ops, {}));
-  pobj.put("Contents", arr);
+  appendContent(d, page.getObject(), ops + "f Q\n");
 }
 
 // A finished copy of the document, made on a temporary copy so the open
@@ -448,7 +733,7 @@ function exportCopy(bake) {
   try {
     tmp = mupdf.Document.openDocument(src.asUint8Array().slice(), "application/pdf");
     if (tmp.needsPassword()) tmp.authenticatePassword(docPassword || "");
-    const erased = applyInkleafRedactions(tmp);
+    const erased = applyContentEdits(tmp);
     if (bake) tmp.bake(true, false);
     const buf = tmp.saveToBuffer("garbage=yes,compress=yes");
     const bytes = buf.asUint8Array().slice();
@@ -520,8 +805,9 @@ const handlers = {
     }
     return { result: out };
   },
-  addAnnot({ page, data }) {
+  async addAnnot({ page, data }) {
     const p = entry(page).page;
+    if (data.shape && data.shape.k === "retext") return { result: await createRetext(p, page, data) };
     if (data.shape) return { result: createShape(p, data) };
     const a = p.createAnnotation(data.type);
     if (author) { try { a.setAuthor(author); } catch {} }
@@ -551,29 +837,69 @@ const handlers = {
     a.update();
     return { result: a.getObject().asIndirect() };
   },
-  updateAnnot({ page, id, data }) {
+  async updateAnnot({ page, id, data }) {
+    if (data.shape && data.shape.k === "retext") return { result: await updateRetext(entry(page).page, page, id, data) };
     return { result: updateShape(entry(page).page, id, data) };
   },
-  // The line of the page's own text under a point (for "Replace text").
+  // The line of the page's own text under a point, for retyping it: its
+  // text, box, exact baseline start, size, colour and font.
   lineAt({ page, p }) {
     const e = entry(page);
     if (!e.stext) e.stext = e.page.toStructuredText("preserve-whitespace");
-    let best = null, bd = Infinity;
-    for (const b of JSON.parse(e.stext.asJSON()).blocks || []) {
-      if (b.type !== "text") continue;
-      for (const l of b.lines || []) {
+    let best = null, bd = Infinity, cur = null;
+    e.stext.walk({
+      beginLine(bbox, wmode, dir) { cur = { bbox, dir, wmode, chars: [] }; },
+      onChar(c, origin, font, size, quad, color) { cur.chars.push({ c, origin, font, size, quad, color }); },
+      endLine() {
+        const l = cur;
+        if (!l.chars.some((ch) => ch.c.trim())) return;
         const bb = l.bbox;
-        if (!bb || !l.text || !l.text.trim()) continue;
-        const dx = p[0] < bb.x ? bb.x - p[0] : p[0] > bb.x + bb.w ? p[0] - bb.x - bb.w : 0;
-        const dy = p[1] < bb.y ? bb.y - p[1] : p[1] > bb.y + bb.h ? p[1] - bb.y - bb.h : 0;
-        const d = dx + dy;
-        if (d < bd) { bd = d; best = l; }
-      }
-    }
+        const dx = p[0] < bb[0] ? bb[0] - p[0] : p[0] > bb[2] ? p[0] - bb[2] : 0;
+        const dy = p[1] < bb[1] ? bb[1] - p[1] : p[1] > bb[3] ? p[1] - bb[3] : 0;
+        if (dx + dy < bd) { bd = dx + dy; best = l; }
+      },
+    });
     if (!best || bd > 3) return { result: null };
-    const f = best.font || {};
-    const fam = /mono|courier/i.test(f.family + f.name) ? "Cour" : /serif|times|roman|georgia|garamond|cambria/i.test(f.family + f.name) && !/sans/i.test(f.family + f.name) ? "TiRo" : "Helv";
-    return { result: { text: best.text.replace(/\s+$/, ""), bbox: [best.bbox.x, best.bbox.y, best.bbox.x + best.bbox.w, best.bbox.y + best.bbox.h], origin: [best.x, best.y], size: Math.round((f.size || 11) * 10) / 10, font: fam } };
+    if (best.wmode || Math.abs(best.dir[1]) > 0.02 || best.dir[0] < 0) return { result: { rotated: true } };
+    const chars = best.chars;
+    let lastInk = chars.length - 1;
+    while (lastInk > 0 && !chars[lastInk].c.trim()) lastInk--;
+    const used = chars.slice(0, lastInk + 1);
+    // The font, size and colour most of the line is set in.
+    const tally = new Map();
+    for (const ch of used) {
+      if (!ch.c.trim()) continue;
+      const k = ch.font.pointer + "|" + ch.size.toFixed(2) + "|" + ch.color.join(",");
+      const t = tally.get(k) || { n: 0, ch };
+      t.n++;
+      tally.set(k, t);
+    }
+    const main = [...tally.values()].sort((a, b) => b.n - a.n)[0].ch;
+    const f = main.font, raw = f.getName();
+    const name = raw.replace(/^[A-Z]{6}\+/, "");
+    const spaces = used.filter((ch) => ch.c === " ").map((ch) => (ch.quad[2] - ch.quad[0]) / ch.size).filter((w) => w > 0.05 && w < 1);
+    spaces.sort((a, b) => a - b);
+    const first = used.find((ch) => ch.c.trim()) || used[0];
+    const xs = used.flatMap((ch) => [ch.quad[0], ch.quad[2], ch.quad[4], ch.quad[6]]);
+    const ys = used.flatMap((ch) => [ch.quad[1], ch.quad[3], ch.quad[5], ch.quad[7]]);
+    const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    return {
+      result: {
+        text: used.map((ch) => ch.c).join(""),
+        bbox,
+        origin: [first.origin[0], first.origin[1]],
+        size: Math.round(main.size * 100) / 100,
+        color: main.color.map((v) => Math.round(v * 1000) / 1000),
+        face: {
+          key: "p" + f.pointer, name,
+          bold: f.isBold() || /bold|black|heavy|semibold|demi/i.test(name),
+          italic: f.isItalic() || /italic|oblique/i.test(name),
+          mono: f.isMono() || /courier|mono|consol/i.test(name),
+          serif: /times|roman|serif|georgia|garamond|cambria|caladea|book|minion|palatino|century/i.test(name) && !/sans/i.test(name),
+          spaceEm: spaces.length ? Math.round(spaces[spaces.length >> 1] * 1000) / 1000 : 0,
+        },
+      },
+    };
   },
   // The file with erase areas applied ({ bake: true } also embeds every
   // markup into the pages; form fields stay fillable).

@@ -4,7 +4,7 @@ A fast PDF reader and markup app for Windows tablets like the Surface Pro, for t
 
 ![Inkleaf PDF measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.4.0** · Windows 10 or 11, 64-bit
+**Current version: 1.4.1** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -87,7 +87,7 @@ The toolbar in the middle holds the tools:
 | **Shapes** | B | Box, line, arrow, cloud, callout or text. Tap the tool again (or its small ▾) to choose. It always draws, even on top of other markups. See [Shapes, text and callouts](#4-shapes-text-and-callouts). |
 | **Signature** | S | Place your signature, with its background removed. See [Sign](#5-sign). |
 | **Eraser** | E | Removes the ink, shapes, text, signatures, highlights and measurements you touch. |
-| **Edit content** | X | Erase an area of the page, or retype a line of the page's own text. Tap the tool again (or its ▾) to choose. See [Edit the page's content](#6-edit-the-pages-content). |
+| **Edit content** | X | Drag a box to erase an area of the page; tap a line of the page's own text to retype it. See [Edit the page's content](#6-edit-the-pages-content). |
 | **Measure** | R | Distance, path length and area at the drawing's scale (see below). |
 
 - **Colors and thickness:** tap the active tool again, or tap the colored dot next to the tools.
@@ -148,14 +148,23 @@ Signatures are saved in the PDF as stamp annotations with a transparent image, s
 
 ### 6. Edit the page's content
 
-The **Edit content** tool (**X**) changes the page itself, not just the markups on top of it. Tap the tool again (or its small ▾) to choose a mode:
+The **Edit content** tool (**X**) changes the page itself, not just the markups on top of it. It does two things, with no modes to switch:
 
-- **Erase area:** drag a box over what you want to remove: text, pictures, lines, anything. The area turns white with a red dashed edge. You can still move, resize or delete it with the Select tool, or undo it.
-- **Replace text:** tap a line of the page's text. It opens for editing in a box over the line, in a matching font and size. Change it and press **Enter**. The old line is erased and your text is put in its place. Delete all the text to just remove the line.
+- **Drag a box to erase an area:** text, pictures, lines, anything. The area turns white with a red dashed edge. Markups you added earlier that lie mostly inside the box (highlights, pen strokes, shapes) disappear with it. You can still resize or delete the box with the Select tool, or undo it.
+- **Tap a line of text to retype it.** It opens for editing right over the line, in the same font. Change it and press **Enter** (**Shift+Enter** adds a line, **Esc** cancels). The new text keeps the line's font, size, weight (bold, italic), colour and exact position. Delete all the text to remove the line.
+  - **Tap it again** to change it again, before or after saving. The Select tool's **Edit text** works too, and **Undo edit** (or Ctrl+Z) puts the original back.
 
-Erase areas are applied when you **save**. Inkleaf asks first, because what's under them is removed from the PDF for good: it can't be copied, searched or recovered from the saved file. To keep the original, use **Save as** (**Ctrl+Shift+S**) for the edited version.
+Everything is applied when you **save**:
+- Edited lines become real text in the PDF: searchable, copyable, and editable again later.
+- For erase areas Inkleaf asks first, because what's under them is removed from the PDF for good: it can't be copied, searched or recovered from the saved file.
+- To keep the original, use **Save as** (**Ctrl+Shift+S**) for the edited version.
 
-> Replacement text is a text box placed over the erased line, so it keeps the original's position, size and colour but can be moved and edited later. Long new text doesn't push the rest of the paragraph along. If the page uses an unusual font, the replacement uses the closest of Helvetica, Times or Courier.
+How the font is matched:
+1. If every letter you type already appears in that font on the page, the document's own embedded font is used, so the result is identical.
+2. Otherwise Inkleaf uses the same font installed on your PC (Calibri, Arial, Times New Roman and so on). Only the letters used are embedded, so the file stays small.
+3. If that font isn't installed either, it uses the closest standard font (Helvetica, Times or Courier, in bold or italic as needed).
+
+> Each line is edited on its own. Longer new text doesn't push the rest of the paragraph along, so for big rewrites erase the paragraph and add a text box instead. Rotated or vertical text can't be retyped, but you can erase it.
 
 ### 7. Select and copy text
 
@@ -262,6 +271,8 @@ These keys always do the same thing in their situation:
 | Tapping a markup draws a new one instead of selecting it | Drawing tools always draw. Choose **Select** (**V**), then tap the markup. |
 | A markup can't be moved or deleted | It has been embedded into the page (**⋯ → Embed markups**), or it was flattened by another app. If you kept the copy without embedding, edit that one. |
 | Erased text still shows in another app | Erase areas are applied when you save. Save, then reopen the file there. |
+| Dragging with Edit content opens a text box instead of erasing | A short drag counts as a tap. Drag a little further. |
+| A retyped line looks slightly different | The font isn't installed on this PC and some letters you typed weren't in the PDF's own copy of it, so the closest standard font was used. Install the font, or keep to letters already on the page. |
 | The mouse wheel zooms when you want it to scroll (or the reverse) | **⋯ → Mouse wheel scrolls / Mouse wheel zooms** |
 
 ## For developers
@@ -279,6 +290,7 @@ Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with
 | `app/shortcuts.js` | Key combos by physical key position, display names, and the keymap of user overrides on top of the defaults. Every command and its default keys live in the `COMMANDS` list in `app/main.js`. |
 | `app/sigproc.js` | Signature background removal: paper colour from the image border, automatic threshold (Otsu), soft edges, paper-tint removal at stroke edges, ink recolouring, crop and PNG export. |
 | `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. |
+| `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
 | `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, and the open/save flow. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
 | `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Inkleaf PDF.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
@@ -286,7 +298,7 @@ Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with
 
 Shapes are standard annotations: box and cloud are `Square` (the cloud uses the PDF's cloudy border effect), line and arrow are `Line`, text and callout are `FreeText` (the callout uses the `FreeTextCallout` intent with a callout line), and signatures are `Stamp` annotations with a transparent image. Each one Inkleaf creates carries an `InkleafShape` key. The viewer draws those from MuPDF's own SVG of the saved appearance, so what you see is exactly what other apps see. Text boxes are sized to the number of lines MuPDF wraps the text into.
 
-Erase areas are `Redact` annotations with an `InkleafShape` key until you save. Saving applies them to a temporary copy of the document: MuPDF's redaction removes the text, covered line art and image pixels under them (other annotations are detached from the page meanwhile, so they survive), the areas are painted white, and the whole file is rewritten with garbage collection, so no old copy of the erased content stays in it. Replacing a line adds an erase area over the line plus a `FreeText` aligned to the old line's baseline. **Embed markups** does the same on a temporary copy, then bakes every annotation into the page content (`bake`, with form widgets left alone).
+Erase areas are `Redact` annotations with an `InkleafShape` key until you save. Saving applies them to a temporary copy of the document: MuPDF's redaction removes the text, covered line art and image pixels under them (other annotations are detached from the page meanwhile, so they survive), the areas are painted white, and the whole file is rewritten with garbage collection, so no old copy of the erased content stays in it. A retyped line is one item (a `Redact` annotation whose `InkleafShape` key holds the text, size, colour, baseline origin, the old line's box and the laid-out glyph runs). The viewer draws it from MuPDF's SVG of those glyphs in the chosen font. On save, the old line's box is redacted and whited out, the font is embedded (`addFont`, with our own `ToUnicode` map), and the text is written into the page content as glyph runs. Everything happens in the order it was made, so a later erase area also removes earlier edited text. The font is the page's own embedded font when its glyphs (captured from the page's text) cover the new text; otherwise the installed font found by `electron/fontindex.js` (name tables of the system fonts, with metric-compatible fallbacks such as Carlito for Calibri), fetched by the worker and subset on save; otherwise a base-14 font. **Embed markups** does the same on a temporary copy, then bakes every annotation into the page content (`bake`, with form widgets left alone).
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
 

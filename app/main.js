@@ -26,7 +26,6 @@ const cfg = Object.assign(
     sidebarOpen: true,
     sidebarW: 300,
     shape: "box",         // box tool: box | line | arrow | cloud | callout | text
-    contentMode: "erase", // edit content tool: erase | replace
     textStyle: null,
     sigFolder: null,      // folder of signature images
     lastSig: null,        // id of the signature placed last
@@ -54,8 +53,8 @@ cfg.styles = Object.assign(
 cfg.textStyle = Object.assign({ size: 12, fillText: false, fillCallout: true }, cfg.textStyle || {});
 const SHAPES = [["box", "square", "Box"], ["line", "line", "Line"], ["arrow", "arrow", "Arrow"], ["cloud", "cloud", "Cloud"], ["callout", "callout", "Callout"], ["text", "text", "Text"]];
 if (!SHAPES.some(([k]) => k === cfg.shape)) cfg.shape = "box";
-const CONTENT_MODES = [["erase", "eraseArea", "Erase area", "Drag a box over what to remove. It is removed for good when you save."], ["replace", "replaceText", "Replace text", "Tap a line of the page's text, retype it, press Enter."]];
-if (!CONTENT_MODES.some(([k]) => k === cfg.contentMode)) cfg.contentMode = "erase";
+delete cfg.contentMode; // 1.4.0 had two modes; the tool now does both
+const CONTENT_HINT = "Drag a box to erase an area · tap a line of text to retype it";
 const TEXT_SIZES = [9, 12, 18, 28];
 cfg.measure = Object.assign({ mode: "distance", color: "#ea580c", dp: null, unit: "mm" }, cfg.measure || {});
 cfg.scales = cfg.scales || {};
@@ -89,6 +88,11 @@ const viewer = new Viewer($("#viewer"), engine, {
   onCopy: (text) => copyText(text),
   onError: (msg) => toast(msg, "error"),
   onInfo: (msg) => toast(msg),
+  // The installed font matching a PDF font, for retyping a line in it.
+  findFont: async (face) => {
+    const f = host.findFont ? await host.findFont({ name: face.name, bold: face.bold, italic: face.italic }) : null;
+    return f && f.file ? { ...f, url: host.fileUrl(f.file) } : null;
+  },
   onSignTap: (page, p, hit) => signTap(page, p, hit),
   onSigned: (sig, rect) => signed(sig, rect),
   onPlacing: (on) => appEl.classList.toggle("placing", on),
@@ -126,12 +130,12 @@ setIcon("#btn-save", "save");
 setIcon("#btn-more", "more");
 setIcon("#btn-touch", "touch");
 $("#empty-open").innerHTML = icon("folderOpen") + " Open folder";
-const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", pen: "pen", box: "square", eraser: "eraser", measure: "ruler", sign: "signature" };
+const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", pen: "pen", box: "square", eraser: "eraser", measure: "ruler", sign: "signature", content: "replaceText" };
 function updateToolIcons() {
   for (const b of document.querySelectorAll(".tool")) {
     const t = b.dataset.tool;
-    const ic = t === "box" ? SHAPES.find(([k]) => k === cfg.shape)[1] : t === "content" ? CONTENT_MODES.find(([k]) => k === cfg.contentMode)[1] : TOOL_ICONS[t];
-    b.innerHTML = icon(ic) + (t === "box" || t === "content" ? `<span class="caret" data-caret="1">${icon("caret")}</span>` : "");
+    const ic = t === "box" ? SHAPES.find(([k]) => k === cfg.shape)[1] : TOOL_ICONS[t];
+    b.innerHTML = icon(ic) + (t === "box" ? `<span class="caret" data-caret="1">${icon("caret")}</span>` : "");
   }
 }
 updateToolIcons();
@@ -157,22 +161,9 @@ function setTool(t) {
   for (const b of document.querySelectorAll(".tool")) b.classList.toggle("active", b.dataset.tool === t);
   updateStyleButton();
   appEl.classList.toggle("measuring", t === "measure");
+  if (t === "content") host.findFont?.({ name: "Arial" }).catch(() => {}); // builds the font list in the background
   if (t === "measure") updateMeasureBar();
   saveCfg();
-}
-
-function setContentMode(m, announce = true) {
-  cfg.contentMode = m;
-  viewer.setContentMode(m);
-  updateToolIcons();
-  if (cfg.tool !== "content") setTool("content");
-  saveCfg();
-  if (announce) toast(CONTENT_MODES.find(([k]) => k === m)[3]);
-}
-function openContentMenu() {
-  showMenu($('.tool[data-tool="content"]'), CONTENT_MODES.map(([k, ic, label]) => ({
-    label: label + (cfg.contentMode === k ? " ✓" : ""), icon: ic, key: keyOf("content." + k), run: () => setContentMode(k),
-  })));
 }
 
 function applyStyles() {
@@ -180,7 +171,6 @@ function applyStyles() {
   viewer.setMeasureStyle({ color: hexToRgb(cfg.measure.color), dp: cfg.measure.dp });
   viewer.measureMode = cfg.measure.mode;
   viewer.setShape(cfg.shape);
-  viewer.setContentMode(cfg.contentMode);
   viewer.setTextStyle(cfg.textStyle);
 }
 
@@ -240,8 +230,7 @@ $("#tools").addEventListener("click", (e) => {
   const t = b.dataset.tool;
   if (t === "sign") { if (cfg.tool !== "sign") setTool("sign"); openSignPanel(); return; }
   if (t === "box" && e.target.closest("[data-caret]")) { if (cfg.tool !== "box") setTool("box"); openStylePopover(); return; }
-  if (t === "content" && (cfg.tool === "content" || e.target.closest("[data-caret]"))) { if (cfg.tool !== "content") setTool("content"); openContentMenu(); return; }
-  if (t === "content") { setTool("content"); toast(CONTENT_MODES.find(([k]) => k === cfg.contentMode)[3]); return; }
+  if (t === "content") { setTool("content"); toast(CONTENT_HINT); return; }
   if (t === cfg.tool && cfg.tool === "measure") openMeasurePopover();
   else if (t === cfg.tool && cfg.styles[cfg.tool]) openStylePopover();
   else setTool(t);
@@ -453,7 +442,7 @@ async function showHelp() {
     ["Select tool: drag over text", "Select it; double-click a word, triple-click a line"],
     ["Shapes tool ▾", "Box, line, arrow, cloud, callout or text; it always draws, even on top of other markups"],
     ["Typing in a text box", "Enter finishes · Shift+Enter starts a new line · Esc cancels"],
-    ["Edit content tool ▾", "Erase area: drag a box, removed for good when you save · Replace text: tap a line, retype it"],
+    ["Edit content tool", "Drag a box to erase an area · tap a line of text to retype it (same font, size and colour); tap it again to change it"],
     ["Callout", "Drag from the spot you're marking to where the text goes, then type"],
     ["Signature tool", "Pick a signature, drag it into place, Place; tap a placed one to move, resize or delete it"],
     ["Measure tool", "Drag or click two points; path and area: click points, double-click or Enter to finish"],
@@ -989,10 +978,10 @@ async function embedMarkups() {
   if (!state.path || state.saving) return;
   viewer.commitEdits();
   if (viewer.placing) viewer.finishPlacing(true);
-  const erase = viewer.pendingRedactions();
+  const pend = viewer.pendingContentEdits();
   const r = await dialog({
     title: "Embed markups",
-    message: "Highlights, drawings, shapes, text boxes and signatures become part of the pages: they can't be moved, edited or deleted any more." + (erase ? " Erase areas are applied too." : "") + "\n\nSave the result as a new copy (this file keeps its editable markups), or replace this file.",
+    message: "Highlights, drawings, shapes, text boxes and signatures become part of the pages: they can't be moved, edited or deleted any more." + (pend.erase || pend.lines ? " Erase areas and edited text are applied too." : "") + "\n\nSave the result as a new copy (this file keeps its editable markups), or replace this file.",
     buttons: [{ id: "cancel", label: "Cancel" }, { id: "replace", label: "Replace this file" }, { id: "copy", label: "Save as a copy…", primary: true }],
   });
   if (r !== "copy" && r !== "replace") return;
@@ -1030,12 +1019,14 @@ async function save({ as = false } = {}) {
   viewer.commitEdits();
   if (viewer.placing) viewer.finishPlacing(true);
   if (!as && !viewer.dirty) { toast("No changes to save"); return; }
-  // Erase areas are applied when saving; after that they can't be undone.
-  const erase = viewer.pendingRedactions();
-  if (erase) {
+  // Erase areas and edited text are applied when saving; after that they
+  // can't be undone.
+  const pend = viewer.pendingContentEdits();
+  const erase = pend.erase + pend.lines;
+  if (pend.erase) {
     const r = await dialog({
       title: "Erase for good?",
-      message: `${erase === 1 ? "1 erase area" : erase + " erase areas"} will be applied: the text, pictures and drawings under ${erase === 1 ? "it" : "them"} are removed from the PDF and can't be brought back after saving.`,
+      message: `${pend.erase === 1 ? "1 erase area" : pend.erase + " erase areas"} will be applied: the text, pictures, drawings and markups under ${pend.erase === 1 ? "it" : "them"} are removed from the PDF and can't be brought back after saving.`,
       buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Erase and save", primary: true }],
     });
     if (r !== "ok") return;
@@ -1091,7 +1082,13 @@ async function save({ as = false } = {}) {
   }
   if (retryAs) return save({ as: true });
   // Show the pages as saved (erased content gone).
-  if (reopen) { await openFile(reopen, { force: true }); toast(erase === 1 ? "Saved · 1 area erased" : `Saved · ${erase} areas erased`); }
+  if (reopen) {
+    await openFile(reopen, { force: true });
+    const parts = ["Saved"];
+    if (pend.erase) parts.push(pend.erase === 1 ? "1 area erased" : `${pend.erase} areas erased`);
+    if (pend.lines) parts.push(pend.lines === 1 ? "1 line edited" : `${pend.lines} lines edited`);
+    toast(parts.join(" · "));
+  }
   if (failure) {
     const r = await dialog({
       title: "Couldn't save",
@@ -1202,7 +1199,7 @@ function setMeasureModeCmd(m) { cfg.measure.mode = m; setTool("measure"); viewer
 function openToolMenu() {
   if (cfg.tool === "measure") openMeasurePopover();
   else if (cfg.tool === "sign") openSignPanel();
-  else if (cfg.tool === "content") openContentMenu();
+  else if (cfg.tool === "content") toast(CONTENT_HINT);
   else openStylePopover();
 }
 async function addSignatureFromFile() {
@@ -1251,8 +1248,6 @@ const COMMANDS = [
   { id: "tool.menu", group: "Tools", label: "Colour and size menu for the current tool", keys: [], run: () => openToolMenu() },
   // Shapes
   ...SHAPES.map(([k, , l]) => ({ id: "shape." + k, group: "Shapes", label: l, keys: [], run: () => setShapeKind(k) })),
-  // Edit content
-  ...CONTENT_MODES.map(([k, , l]) => ({ id: "content." + k, group: "Edit content", label: l, keys: [], run: () => setContentMode(k) })),
   // Signature
   { id: "sig.panel", group: "Signature", label: "Open My signatures", keys: [], run: () => { if (cfg.tool !== "sign") setTool("sign"); openSignPanel(); } },
   { id: "sig.add", group: "Signature", label: "Add signature from file…", keys: [], run: () => addSignatureFromFile() },
@@ -1332,7 +1327,7 @@ const TITLES = {
   "tool.pen": [".tool[data-tool=pen]", "Pen"],
   "tool.box": [".tool[data-tool=box]", "Shapes: box, line, arrow, cloud, callout, text. Tap again to choose. To move or edit a shape, use Select"],
   "tool.sign": [".tool[data-tool=sign]", "Signature: add your signature, then drag it into place; tap a placed one to move, resize or delete it"],
-  "tool.content": [".tool[data-tool=content]", "Edit content: erase an area of the page, or tap a line of text to retype it. Tap again to choose"],
+  "tool.content": [".tool[data-tool=content]", "Edit content: drag a box to erase an area of the page; tap a line of text to retype it in the same font"],
   "tool.eraser": [".tool[data-tool=eraser]", "Eraser"],
   "tool.measure": [".tool[data-tool=measure]", "Measure distance, path length and area"],
   "tool.touch": ["#btn-touch", "Finger draws on/off. Off: finger pans and zooms, pen draws"],

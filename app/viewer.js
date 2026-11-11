@@ -95,6 +95,21 @@ const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "meas
 const FONT_CSS = { Helv: "Helvetica, Arial, sans-serif", TiRo: '"Times New Roman", Times, serif', Cour: '"Courier New", Courier, monospace' };
 const round2 = (v) => Math.round(v * 100) / 100;
 
+// CSS font for typing over a line of the page (the real font is used once
+// the edit is made): the installed family, else the PDF's font name.
+function faceCss(face = {}) {
+  const generic = face.mono ? "monospace" : face.serif ? "serif" : "sans-serif";
+  const base = face.family || String(face.name || "").replace(/^[A-Z]{6}\+/, "").split(/[,-]/)[0].replace(/(PSMT|PS|MT)$/, "");
+  return { family: (base ? `"${base.replace(/"/g, "")}", ` : "") + generic, weight: face.bold ? "700" : "400", style: face.italic ? "italic" : "normal" };
+}
+
+// Share of rect `r` lying inside rect `by`.
+function coverage(r, by) {
+  const w = Math.min(r[2], by[2]) - Math.max(r[0], by[0]), h = Math.min(r[3], by[3]) - Math.max(r[1], by[1]);
+  const a = Math.max(1e-6, (r[2] - r[0]) * (r[3] - r[1]));
+  return w > 0 && h > 0 ? (w * h) / a : 0;
+}
+
 export class Viewer {
   constructor(root, engine, callbacks = {}) {
     this.root = root;
@@ -132,7 +147,6 @@ export class Viewer {
       box: { color: [0.86, 0.15, 0.15], width: 2 },
     };
     this.shape = "box";          // box tool: box | line | arrow | cloud | callout | text
-    this.contentMode = "erase";  // edit content tool: erase | replace
     this.textStyle = { size: 12, fillText: false, fillCallout: true };
     this.editor = null;          // text box / callout being typed
     this.shapeSel = null;        // shape selected for moving / editing
@@ -981,7 +995,6 @@ export class Viewer {
       case "select": this._moveSelect(a, e); break;
       case "measure": this._measureMove(a, e); break;
       case "pickmark": this._movePick(a, e); break;
-      case "replace": break;
     }
   }
 
@@ -1041,7 +1054,6 @@ export class Viewer {
       case "select": this._finishSelect(a, cancel); break;
       case "measure": this._measureUp(a, cancel); break;
       case "pickmark": if (!cancel) this.selectShape(a.page, a.d); break;
-      case "replace": if (!cancel) this._replaceAt(a.page, a.start); break;
       case "pinch": this._ztCommit(this.vw / 2, this.vh / 2); break;
     }
   }
@@ -1070,7 +1082,7 @@ export class Viewer {
       return;
     }
     if (tapLike && this.tool === "select" && this._shapeTap(ptr)) return;
-    if (tapLike && this.tool === "content" && this.contentMode === "replace") { this._replaceTap(ptr); return; }
+    if (tapLike && this.tool === "content") { this._replaceTap(ptr); return; }
     if (!cancelled && !a.resumed && ptr.type === "touch" && moved < 12 && t - ptr.t0 < 300) {
       this._tap(ptr);
       return;
@@ -1169,8 +1181,8 @@ export class Viewer {
     if (this.tool === "pen") this._startInk(base, p, e);
     else if (this.tool === "highlight") this._startHighlight(base, p, e);
     else if (this.tool === "box") this._startBox(base, p);
-    else if (this.tool === "content" && this.contentMode === "erase") this._startBox(base, p, "redact");
-    else if (this.tool === "content") this.action = { ...base, kind: "replace", start: p };
+    // Edit content: drag a box to erase an area; tap text to retype it.
+    else if (this.tool === "content") { this._startBox(base, p, "redact"); this.action.tapEdit = true; }
     else return false;
     return true;
   }
@@ -1468,7 +1480,10 @@ export class Viewer {
       return;
     }
     const [x0, y0, x1, y1] = this._boxRect(a);
-    if ((x1 - x0) * this.scale < 4 || (y1 - y0) * this.scale < 4) return;
+    if ((x1 - x0) * this.scale < 4 || (y1 - y0) * this.scale < 4) {
+      if (a.tapEdit && (x1 - x0) * this.scale < 8 && (y1 - y0) * this.scale < 8) this._replaceAt(a.page, a.start);
+      return;
+    }
     if (k === "redact") {
       this._commitAdd(a.page, { type: "Redact", shape: { k }, rect: [x0, y0, x1, y1].map(round2), color: [], width: 0, opacity: 1 });
       return;
@@ -1527,7 +1542,7 @@ export class Viewer {
     box.style.width = (o.W / P.w) * 100 + "%";
     const ta = el("textarea", "", box);
     ta.spellcheck = true;
-    ta.placeholder = o.kind === "callout" ? "Callout text" : "Type text";
+    ta.placeholder = o.kind === "callout" ? "Callout text" : o.kind === "retext" ? "Empty: the line is removed" : "Type text";
     ta.value = o.text || "";
     const col = cssColor(o.color);
     ta.style.setProperty("--ts", o.size + "px");
@@ -1536,7 +1551,12 @@ export class Viewer {
     ta.style.borderColor = o.bw ? col : "";
     ta.classList.toggle("bordered", !!o.bw);
     ta.classList.toggle("filled", !!((o.fill && o.fill.length) || o.editFill));
-    ta.style.fontFamily = FONT_CSS[o.font] || FONT_CSS.Helv;
+    if (o.face) {
+      const css = faceCss(o.face);
+      ta.style.fontFamily = css.family;
+      ta.style.fontWeight = css.weight;
+      ta.style.fontStyle = css.style;
+    } else ta.style.fontFamily = FONT_CSS[o.font] || FONT_CSS.Helv;
     const bar = el("div", "te-bar", box);
     bar.innerHTML = `<span class="te-hint">Shift+Enter: new line</span><button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="done">Done</button>`;
     box.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -1579,20 +1599,11 @@ export class Viewer {
     const text = E.ta.value.replace(/\s+$/, "");
     const lines = text.split("\n").length;
     const rect = [E.x, E.y, E.x + E.W, E.y + lines * E.size * 1.2 + 2 * E.bw + 3].map(round2);
-    if (E.replace) {
-      const R = E.replace;
-      if (text === R.text) return;
-      const ops = [];
-      const red = { type: "Redact", shape: { k: "redact" }, rect: [R.bbox[0] - 0.5, R.bbox[1] - 0.5, R.bbox[2] + 0.5, R.bbox[3] + 0.5].map(round2), color: [], width: 0, opacity: 1 };
-      this._insertAnnot(E.page, red);
-      ops.push({ op: "add", page: E.page, data: red });
-      if (text.trim()) {
-        const d = { type: "FreeText", shape: { k: "text" }, text, size: E.size, color: E.color, fill: [], width: 0, rect, opacity: 1, align: R.origin };
-        if (E.font && E.font !== "Helv") d.font = E.font;
-        this._insertAnnot(E.page, d);
-        ops.push({ op: "add", page: E.page, data: d });
-      }
-      this._pushHistory(ops);
+    if (E.kind === "retext") {
+      const L = E.line;
+      if (text === L.text) return;
+      if (E.target) { this._updateShape(E.page, E.target, { ...this._snap(E.target), text }); return; }
+      this._commitAdd(E.page, { type: "Redact", shape: { k: "retext" }, text, size: L.size, color: L.color, origin: L.origin, erase: L.erase, face: L.face, rect: L.erase.slice(), width: 0, opacity: 1 });
       return;
     }
     if (E.target) {
@@ -1624,8 +1635,9 @@ export class Viewer {
     return d.type === "Ink" ? "ink" : d.type === "Highlight" ? "highlight" : "box";
   }
 
-  // Highlights and measurements can be selected (to delete) but not moved.
-  _canMove(kind) { return kind !== "highlight" && kind !== "measure"; }
+  // Highlights, measurements and edited lines of text can be selected (to
+  // delete, or retype) but not moved.
+  _canMove(kind) { return kind !== "highlight" && kind !== "measure" && kind !== "retext"; }
 
   // Topmost markup under a point.
   _pickShape(i, p) {
@@ -1633,7 +1645,8 @@ export class Viewer {
     const list = this.doc.annots.get(i) || [];
     for (let k = list.length - 1; k >= 0; k--) {
       const d = list[k], kind = this._kindOf(d);
-      if ((kind === "box" || kind === "cloud" || kind === "redact") && d.rect) {
+      if (this._erased.has(d)) continue;
+      if ((kind === "box" || kind === "cloud" || kind === "redact" || kind === "retext") && d.rect) {
         const r = d.rect;
         if (p[0] >= r[0] - tol && p[0] <= r[2] + tol && p[1] >= r[1] - tol && p[1] <= r[3] + tol) return d;
       } else if (this._hitAnnot(d, p, tol)) return d;
@@ -1656,7 +1669,7 @@ export class Viewer {
 
   _snap(d) {
     const g = {};
-    for (const k of ["pts", "rect", "ink", "text", "size", "font", "color", "fill", "width", "callout"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
+    for (const k of ["pts", "rect", "ink", "text", "size", "font", "color", "fill", "width", "callout", "origin", "erase", "face"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
     return g;
   }
 
@@ -1672,6 +1685,7 @@ export class Viewer {
     Object.assign(d, JSON.parse(JSON.stringify(snap)));
     if (d.shape) d.svg = null;
     this._redrawAnnot(i, d);
+    this._refreshErased(i);
     if (this.shapeSel && this.shapeSel.d === d) this._renderShapeSel();
     this.engine.updateAnnot(i, () => d.id, () => this._payload(d), d)
       .then(() => {
@@ -1727,6 +1741,7 @@ export class Viewer {
     const S = this.shapeSel;
     if (!S) return;
     const d = S.d, k = this._kindOf(d);
+    if (k === "retext") { this.deselectShape(); this._editRetext(S.page, d); return; }
     if (k !== "text" && k !== "callout") return;
     this.deselectShape();
     const [x0, y0, x1] = d.rect;
@@ -1773,7 +1788,7 @@ export class Viewer {
       const roles = ["box", "cloud", "redact", "sig"].includes(kind) ? ["nw", "ne", "sw", "se"] : kind === "line" || kind === "arrow" ? ["p0", "p1"] : kind === "callout" ? ["tip"] : [];
       for (const r of roles) { const h = el("div", "ss-h " + r, S.el); h.dataset.role = r; }
       const bar = el("div", "ss-bar", S.el);
-      bar.innerHTML = (kind === "text" || kind === "callout" ? `<button class="btn" data-act="edit">Edit text</button>` : "") + `<button class="btn" data-act="delete">Delete</button>`;
+      bar.innerHTML = (kind === "text" || kind === "callout" || kind === "retext" ? `<button class="btn" data-act="edit">Edit text</button>` : "") + `<button class="btn" data-act="delete">${kind === "retext" ? "Undo edit" : "Delete"}</button>`;
       bar.addEventListener("pointerdown", (e) => e.stopPropagation());
       bar.addEventListener("click", (e) => {
         const b = e.target.closest("[data-act]");
@@ -1922,17 +1937,16 @@ export class Viewer {
   // Finish typing (e.g. before saving).
   commitEdits() { this._closeEditor(true); }
 
-  // ---- replacing a line of the page's own text / erasing areas
-  setContentMode(mode) {
-    this._closeEditor(true);
-    this.contentMode = mode;
-    this.root.dataset.content = mode;
-  }
-
-  // Erase areas waiting to be applied (they are applied when saving).
-  pendingRedactions() {
-    let n = 0;
-    for (const list of this.doc ? this.doc.annots.values() : []) for (const d of list) if (d.shape && d.shape.k === "redact") n++;
+  // ---- editing the page's own content: erase areas and retyped lines
+  // Erase areas and edited lines waiting to be applied (done when saving).
+  pendingContentEdits() {
+    const n = { erase: 0, lines: 0 };
+    for (const list of this.doc ? this.doc.annots.values() : []) {
+      for (const d of list) {
+        if (d.shape && d.shape.k === "redact") n.erase++;
+        else if (d.shape && d.shape.k === "retext") n.lines++;
+      }
+    }
     return n;
   }
 
@@ -1942,16 +1956,71 @@ export class Viewer {
     if (i >= 0) this._replaceAt(i, this._worldToPage(i, wx, wy));
   }
 
+  // Tap with Edit content: retype an edited line again, or the page's text.
   async _replaceAt(i, p) {
     const doc = this.doc;
+    const list = doc.annots.get(i) || [];
+    for (let k = list.length - 1; k >= 0; k--) {
+      const d = list[k];
+      if (d.shape && d.shape.k === "retext" && !this._erased.has(d) && d.rect && p[0] >= d.rect[0] && p[0] <= d.rect[2] && p[1] >= d.rect[1] && p[1] <= d.rect[3]) {
+        this._editRetext(i, d);
+        return;
+      }
+    }
     let line = null;
     try { line = await this.engine.lineAt(i, p); } catch {}
     if (this.doc !== doc) return;
-    if (!line) { this.cb.onInfo?.("No text here. To white out part of a page, choose Erase area."); return; }
-    const P = doc.pages[i];
-    const x = line.bbox[0] - 2;
-    const W = Math.max(line.bbox[2] - line.bbox[0] + line.size * 2, P.x1 - x - 12);
-    this._showEditor({ page: i, kind: "text", x, y: line.bbox[1] - 1, W, size: line.size, bw: 0, fill: [], editFill: true, color: [0, 0, 0], font: line.font, text: line.text, replace: line });
+    if (!line) { this.cb.onInfo?.("No text here. Drag a box to erase an area instead."); return; }
+    if (line.rotated) { this.cb.onInfo?.("Rotated or vertical text can't be retyped. Drag a box over it to erase it."); return; }
+    const face = { ...line.face };
+    try {
+      const f = await this.cb.findFont?.(face);
+      if (f) Object.assign(face, { file: f.file, url: f.url, index: f.index, ps: f.ps, family: f.family });
+    } catch {}
+    if (this.doc !== doc || this.editor) return;
+    const erase = [line.bbox[0] - 0.5, line.bbox[1] - 0.5, line.bbox[2] + 0.5, line.bbox[3] + 0.5].map(round2);
+    this._showLineEditor(i, { text: line.text, size: line.size, color: line.color, origin: line.origin, erase, face }, null);
+  }
+
+  _editRetext(i, d) {
+    this._showLineEditor(i, { text: d.text, size: d.size, color: d.color, origin: d.origin, erase: d.erase, face: d.face }, d);
+  }
+
+  // The editor sits over the line with its first baseline on the line's.
+  _showLineEditor(i, L, target) {
+    const P = this.doc.pages[i];
+    const x = L.origin[0] - 2;
+    const W = Math.max(L.erase[2] - L.erase[0] + L.size * 2, P.x1 - x - 12);
+    this._showEditor({ page: i, kind: "retext", x, y: L.origin[1] - L.size * 0.945 - 1, W, size: L.size, bw: 0, fill: [], editFill: true, color: L.color, face: L.face, text: L.text, line: L, target });
+  }
+
+  // Markups made before an erase area and lying mostly inside it are removed
+  // with it when saving: hide them now so the page shows the result.
+  _refreshErased(i) {
+    const list = this.doc?.annots.get(i);
+    if (!list) return;
+    const areas = [];
+    list.forEach((d, k) => { if (d.shape && d.shape.k === "redact" && d.rect) areas.push([k, d.rect]); });
+    list.forEach((d, k) => {
+      let hide = false;
+      if (areas.length && !(d.shape && (d.shape.k === "redact" || d.shape.k === "retext"))) {
+        const b = this._annotBox(d);
+        if (b) hide = areas.some(([ak, r]) => ak > k && coverage(b, r) >= 0.5);
+      }
+      if (hide) this._erased.add(d); else this._erased.delete(d);
+      this._nodes.get(d)?.classList.toggle("erased", hide);
+      if (hide && this.shapeSel && this.shapeSel.d === d) this.deselectShape();
+    });
+  }
+
+  get _erased() { return (this.__erased ||= new WeakSet()); }
+
+  _annotBox(d) {
+    if (d.rect) return d.rect;
+    let pts = d.pts || (d.ink && d.ink.flat()) || (d.quads && d.quads.flatMap((q) => quadPoly(q)));
+    if (!pts || !pts.length) return d.bounds || null;
+    const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
   }
 
   // ---- signatures
@@ -2671,6 +2740,7 @@ export class Viewer {
       const local = d.annots.get(i) || [];
       d.annots.set(i, list.concat(local));
       for (const a of list) this._drawAnnot(i, a);
+      this._refreshErased(i);
     }).catch((err) => console.warn("annots", err));
     d.annotsP.set(i, pr);
     return pr;
@@ -2679,7 +2749,7 @@ export class Viewer {
   _drawAnnot(i, d) {
     const s = this._state(i);
     let node;
-    if (d.shape && d.shape.k === "redact") {
+    if (d.shape && (d.shape.k === "redact" || d.shape.k === "retext")) {
       node = this._shapeNode(d);
       s.svgErase.appendChild(node);
     } else if (d.shape) {
@@ -2704,12 +2774,26 @@ export class Viewer {
       s.svgMeas.insertBefore(node, s.prevMeas);
     }
     if (node) this._nodes.set(d, node);
+    if (node && this._erased.has(d)) node.classList.add("erased");
   }
 
   // Shapes are drawn from MuPDF's SVG of their saved appearance. Until that
   // arrives (a few ms after creating one) a close approximation stands in.
   _shapeNode(d) {
     const k = d.shape.k;
+    if (k === "retext") {
+      const g = svgEl("g", { class: "shape retext" });
+      if (d.svg) { g.innerHTML = d.svg; return g; }
+      // Until MuPDF's drawing arrives: white-out and the text in a close font.
+      const e = d.erase;
+      svgEl("rect", { x: e[0], y: e[1], width: e[2] - e[0], height: e[3] - e[1], fill: "#fff" }, g);
+      const css = faceCss(d.face);
+      d.text.split("\n").forEach((line, j) => {
+        const t = svgEl("text", { x: d.origin[0], y: d.origin[1] + j * d.size * 1.2, "font-size": d.size, fill: cssColor(d.color), "font-family": css.family, "font-weight": css.weight, "font-style": css.style }, g);
+        t.textContent = line;
+      });
+      return g;
+    }
     if (k === "redact") {
       const [x0, y0, x1, y1] = d.rect;
       const g = svgEl("g", { class: "shape redact" });
@@ -2766,7 +2850,7 @@ export class Viewer {
   _payload(d) {
     if (d.shape) {
       const o = { type: d.type, shape: d.shape, color: d.color, opacity: d.opacity, width: d.width };
-      for (const k of ["pts", "rect", "text", "size", "fill", "callout", "png", "font"]) if (d[k] != null) o[k] = d[k];
+      for (const k of ["pts", "rect", "text", "size", "fill", "callout", "png", "font", "origin", "erase", "face"]) if (d[k] != null) o[k] = d[k];
       // Replacement text lines up with the old line once, when created (an
       // undo/redo later must not pull a moved box back).
       if (d.align) { o.align = d.align; delete d.align; }
@@ -2787,6 +2871,7 @@ export class Viewer {
     doc.annots.get(i).push(d);
     if (d.shape) d.svg = null; // redrawn from the new annotation's appearance
     this._drawAnnot(i, d);
+    this._refreshErased(i);
     d.id = 0;
     this.engine.addAnnot(i, () => this._payload(d), d)
       .then(() => this._annotReady(d))
@@ -2800,6 +2885,7 @@ export class Viewer {
     if (k >= 0) list.splice(k, 1);
     this._nodes.get(d)?.remove();
     this._nodes.delete(d);
+    this._refreshErased(i);
     // A signature loaded from the file: keep its image so undo can restore it.
     if (d.shape?.k === "sig" && !d.png) this.engine.annotImage(i, () => d.id).then((png) => { if (png) d.png = png; }).catch(() => {});
     this.engine.deleteAnnot(i, () => d.id);

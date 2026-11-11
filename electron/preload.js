@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("inkleaf", {
   showInFolder: (p) => ipcRenderer.invoke("show-in-folder", p),
   toggleFullscreen: () => ipcRenderer.invoke("toggle-fullscreen"),
   copyText: (text) => ipcRenderer.invoke("copy-text", text),
+  findFont: (q) => ipcRenderer.invoke("find-font", q),
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || null; } catch { return null; }
   },

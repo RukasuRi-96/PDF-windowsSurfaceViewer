@@ -78,34 +78,15 @@ SIGN (S)
   resize or delete it (Delete button or Delete key). "Choose folder..."
   lists the images in a folder of signatures.
 
-EDIT THE PAGE'S CONTENT (X) - tap the tool again to choose
-  Erase area: drag a box over anything on the page to remove it.
-  Replace text: tap a line of the page's text, retype it, press Enter.
-  Erase areas are applied when you save (Inkleaf asks first): what is
-  under them is removed from the PDF for good. Use Save as to keep the
-  original.
-
-SELECT & COPY TEXT (V)
-  Drag over text to select it (across pages too). Double-click selects a
-  word, triple-click a line, Ctrl+A the whole page. Press Ctrl+C or tap
-  "Copy" on the little bar that appears; "Highlight" turns the selection
-  into a highlight. Dragging on blank paper pans.
-
-MEASURE (R) - distance, path length and area at the drawing's scale
-  1. Set the scale: click the scale button on the measuring bar at the
-     bottom (e.g. 1:100, 1/4" = 1'-0"), or choose "Calibrate" and draw
-     a line over a dimension you know, then type its real length.
-     The scale can apply to all pages or to one page.
-  2. Tap the Measure tool again to pick Distance, Path length or Area,
-     the units (mm, cm, m, km, in, ft, ft-in), decimals and color.
-  Distance: drag, or click the two ends.
-  Path / Area: click each point; double-click, Enter or Done finishes;
-  clicking the first point closes an area. Backspace removes the last
-  point, Esc cancels, Shift snaps to 0/45/90 degrees. With a finger,
-  tap to place points and drag to pan.
-  Measurements are saved into the PDF as standard measurement markups
-  (with the value in their note), and the eraser and undo work on them.
-  If you change the scale later, Inkleaf offers to recalculate them.
+EDIT THE PAGE'S CONTENT (X)
+  Drag a box to erase an area: text, pictures, lines, and the markups
+  you added inside it.
+  Tap a line of text to retype it, then press Enter. It keeps the
+  line's font, size, bold/italic, colour and position. Tap it again to
+  change it again, before or after saving.
+  Everything is applied when you save (Inkleaf asks first for erase
+  areas): what is under them is removed from the PDF for good. Use
+  Save as to keep the original.
 
 SAVING
   Ctrl+S saves the annotations straight into the PDF as standard PDF

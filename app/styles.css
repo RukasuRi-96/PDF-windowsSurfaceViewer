@@ -188,7 +188,6 @@ input { font: inherit; color: inherit; user-select: text; }
 .viewer[data-tool="eraser"] { cursor: cell; }
 .viewer[data-tool="measure"] { cursor: crosshair; }
 .viewer[data-tool="content"] { cursor: crosshair; }
-.viewer[data-tool="content"][data-content="replace"] { cursor: text; }
 .viewer[data-tool="select"].over-text { cursor: text; }
 .viewer.panning, .viewer.panning[data-tool] { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
@@ -227,6 +226,8 @@ input { font: inherit; color: inherit; user-select: text; }
 /* erase areas: shown white (as they will be once saved) with a red dashed edge */
 .annots .redact .rd-fill { fill: #fff; stroke: none; }
 .annots .redact .rd-line { fill: none; stroke: #d93025; stroke-width: 1.5px; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+/* markups under an erase area: removed with it when saving */
+.annots .erased { display: none; }
 .page .text-edit { position: absolute; z-index: 3; }
 .text-edit textarea {
   display: block; width: 100%; margin: 0; border-radius: 0; resize: none; overflow: hidden;

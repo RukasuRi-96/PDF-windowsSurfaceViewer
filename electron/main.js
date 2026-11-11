@@ -5,6 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const { Readable } = require("stream");
 const { scanFolder, writeFileSafe, stat, listImages } = require("./fsops");
+const { findFont } = require("./fontindex");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } },
@@ -166,6 +167,7 @@ ipcMain.handle("save-as", async (_e, p, bytes) => {
   return r.filePath;
 });
 ipcMain.handle("read-json", (_e, name) => readJsonSync(name));
+ipcMain.handle("find-font", (_e, q) => findFont(q || {}).catch(() => null));
 ipcMain.handle("write-json", (_e, name, value) => writeJson(name, value));
 ipcMain.handle("show-in-folder", (_e, p) => { if (p) shell.showItemInFolder(p); });
 ipcMain.handle("toggle-fullscreen", () => { if (win) win.setFullScreen(!win.isFullScreen()); });
