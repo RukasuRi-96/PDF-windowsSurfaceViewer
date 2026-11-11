@@ -142,11 +142,31 @@ export class Engine {
   }
   pageAnnots(page) { return this._edit(() => this.edit.call("pageAnnots", { page })); }
   // `target.id` is set inside the chain, before any later delete runs.
+  // Shapes also come back with MuPDF's SVG of their appearance and final
+  // bounds (text boxes are fitted to their text).
   addAnnot(page, data, target) {
     return this._edit(async () => {
-      const id = await this.edit.call("addAnnot", { page, data });
-      if (target) target.id = id;
-      return id;
+      // `data` may be a function: evaluated in order, after earlier edits finished.
+      const payload = typeof data === "function" ? data() : data;
+      const r = await this.edit.call("addAnnot", { page, data: payload });
+      const shape = r && typeof r === "object";
+      const id = shape ? r.id : r;
+      if (target) {
+        target.id = id;
+        if (shape) {
+          target.svg = r.svg;
+          target.bounds = r.bounds;
+          if (r.rect) target.rect = r.rect;
+        }
+      }
+      return r;
+    });
+  }
+  // Transparent PNG of a signature stamp (null if it no longer exists).
+  annotImage(page, getId) {
+    return this._edit(() => {
+      const id = typeof getId === "function" ? getId() : getId;
+      return id ? this.edit.call("annotImage", { page, id }) : null;
     });
   }
   deleteAnnot(page, getId) {

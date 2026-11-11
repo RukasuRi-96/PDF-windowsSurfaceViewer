@@ -69,4 +69,24 @@ async function stat(p) {
   return { size: s.size, mtime: s.mtimeMs, isDirectory: s.isDirectory() };
 }
 
-module.exports = { scanFolder, writeFileSafe, stat };
+// Signature images in a folder (and one level of subfolders), newest first.
+async function listImages(dir, { max = 200 } = {}) {
+  const out = [];
+  const visit = async (d, depth) => {
+    let entries;
+    try { entries = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= max || e.name.startsWith(".")) continue;
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) { if (depth < 1) await visit(full, depth + 1); }
+      else if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(e.name)) {
+        try { const s = await fsp.stat(full); out.push({ name: e.name, path: full, mtime: s.mtimeMs, size: s.size }); } catch {}
+      }
+    }
+  };
+  await visit(dir, 0);
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out;
+}
+
+module.exports = { scanFolder, writeFileSafe, stat, listImages };

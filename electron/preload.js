@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("inkleaf", {
   initialFile: init.file,
   pickFolder: () => ipcRenderer.invoke("pick-folder"),
   pickFile: () => ipcRenderer.invoke("pick-file"),
+  pickImages: () => ipcRenderer.invoke("pick-images"),
+  listImages: (dir) => ipcRenderer.invoke("list-images", dir),
   scanFolder: (dir) => ipcRenderer.invoke("scan-folder", dir),
   fileUrl: (p) => "app://inkleaf/@file?p=" + encodeURIComponent(p) + "&t=" + Date.now(),
   stat: (p) => ipcRenderer.invoke("stat", p),

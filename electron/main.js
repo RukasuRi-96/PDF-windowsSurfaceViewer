@@ -4,7 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { Readable } = require("stream");
-const { scanFolder, writeFileSafe, stat } = require("./fsops");
+const { scanFolder, writeFileSafe, stat, listImages } = require("./fsops");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } },
@@ -146,6 +146,15 @@ ipcMain.handle("pick-file", async () => {
   const r = await dialog.showOpenDialog(win, { title: "Open PDF", properties: ["openFile"], filters: [{ name: "PDF", extensions: ["pdf"] }] });
   return r.canceled ? null : r.filePaths[0];
 });
+ipcMain.handle("pick-images", async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: "Choose a signature image",
+    properties: ["openFile", "multiSelections"],
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
+ipcMain.handle("list-images", (_e, dir) => listImages(dir));
 ipcMain.handle("scan-folder", (_e, dir) => scanFolder(dir));
 ipcMain.handle("stat", (_e, p) => stat(p));
 ipcMain.handle("write-file", (_e, p, bytes) => writeFileSafe(p, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)));

@@ -44,8 +44,29 @@ MOUSE
                            in zoom mode Shift+wheel scrolls.
 
 TOOLS (tap the active tool again for colors and thickness)
-  Select (V)  Pan (H)  Highlight (M)  Pen (P)  Box (B)  Eraser (E)  Measure (R)
+  Select (V)  Pan (H)  Highlight (M)  Pen (P)  Shapes (B)  Signature (S)
+  Eraser (E)  Measure (R)
   Highlight snaps to text; where there is no text it becomes a marker.
+
+SHAPES (B) - tap the tool again (or its small arrow) to choose
+  Box, Line, Arrow, Cloud: drag. Shift keeps lines at 0/45/90 degrees.
+  Callout: drag from the spot you're marking to where the text goes,
+  then type. Text: tap (or drag to set the width), then type.
+  While typing: Enter = new line, Ctrl+Enter or Done = finish,
+  Esc = cancel. The same menu sets text size and a white background.
+
+SIGN (S)
+  1. Choose the Signature tool and click "Add signature from file..."
+     (a photo or scan: PNG, JPG, GIF, BMP or WebP).
+  2. The paper background is removed for you. Slide "Remove
+     background" right to remove more, left to keep faint strokes.
+     Pick the ink colour and click "Use signature".
+  3. Drag the signature into place, drag a corner to resize it, then
+     click Place (or press Enter).
+  Next time: tap it in My signatures, or just tap the page with the
+  Signature tool to place your last one. Tap a placed signature to move
+  or resize it. "Choose folder..." lists the images in a folder of
+  signatures.
 
 SELECT & COPY TEXT (V)
   Drag over text to select it (across pages too). Double-click selects a

@@ -10,6 +10,8 @@ const names = {
   collapse: "chevrons-down-up",
   select: "text-cursor", ruler: "ruler", distance: "move-diagonal-2", path: "waypoints", area: "pentagon",
   calibrate: "crosshair",
+  line: "minus", arrow: "move-up-right", cloud: "cloud", callout: "message-square-text", text: "type",
+  signature: "signature", imagePlus: "image-plus", trash: "trash-2", caret: "chevron-down", wand: "wand-sparkles",
 };
 const dir = path.join(__dirname, "..", "node_modules", "lucide-static", "icons");
 let out = "// Generated from lucide-static (ISC License, https://lucide.dev). Do not edit.\nexport const ICONS = {\n";

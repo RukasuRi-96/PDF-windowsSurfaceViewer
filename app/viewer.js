@@ -130,6 +130,18 @@ export class Viewer {
       highlight: { color: [1, 0.86, 0.1], width: 12 },
       box: { color: [0.86, 0.15, 0.15], width: 2 },
     };
+    this.shape = "box";          // box tool: box | line | arrow | cloud | callout | text
+    this.textStyle = { size: 12, fillText: false, fillCallout: true };
+    this.editor = null;          // text box / callout being typed
+    this.placing = null;         // signature being positioned
+    this.placeBar = el("div", "placebar", root);
+    this.placeBar.hidden = true;
+    this.placeBar.innerHTML = `<span class="pb-text">Drag to move · drag a corner to resize · tap the page to move it there</span><button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="place">Place</button>`;
+    this.placeBar.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.placeBar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (b) this.finishPlacing(b.dataset.act === "place");
+    });
     this.touchDraws = false;
     this.wheelZooms = false;     // plain mouse wheel zooms instead of scrolling
     this.measureMode = "distance";
@@ -196,6 +208,8 @@ export class Viewer {
   }
 
   close() {
+    this._closeEditor(false);
+    this.finishPlacing(false);
     this._stopInertia();
     this.action = null;
     this.root.classList.remove("panning", "over-text");
@@ -845,6 +859,8 @@ export class Viewer {
     if (tool !== this.tool) {
       if (this.mdraft || this._calibrating) this.cancelMeasure();
       if (this.sel && tool !== "select") this.clearSelection();
+      this._closeEditor(true);
+      if (this.placing) this.finishPlacing(false);
     }
     this.tool = tool;
     this.root.dataset.tool = tool;
@@ -857,6 +873,16 @@ export class Viewer {
 
   setStyle(tool, style) {
     Object.assign(this.styles[tool], style);
+  }
+
+  setShape(shape) {
+    this._closeEditor(true);
+    this.shape = shape;
+    this.root.dataset.shape = shape;
+  }
+
+  setTextStyle(style) {
+    Object.assign(this.textStyle, style);
   }
 
   _isEraser(e) {
@@ -888,6 +914,8 @@ export class Viewer {
     try { this.root.setPointerCapture(e.pointerId); } catch {}
     const ptr = { id: e.pointerId, type, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: t, ignored: false };
     this.pointers.set(e.pointerId, ptr);
+    // Tapping outside a text box being typed finishes it (and does nothing else).
+    if (this.editor) { this._closeEditor(true); ptr.ignored = true; return; }
 
     if (type === "touch") {
       const n = this._touchCount();
@@ -901,10 +929,12 @@ export class Viewer {
         return;
       }
       if (n > 2) { ptr.ignored = true; return; }
-      if (this.touchDraws && DRAW_TOOLS.has(this.tool)) { if (this._startTool(e, ptr, true)) return; }
+      if (this.touchDraws && !this.placing && DRAW_TOOLS.has(this.tool)) { if (this._startTool(e, ptr, true)) return; }
       this._startPan(ptr, true);
       return;
     }
+    // While a signature is being placed, drags pan and taps move it.
+    if (this.placing) { this._startPan(ptr, type === "pen"); return; }
     if (type === "pen") {
       if (this._isEraser(e)) { this._startErase(e, ptr, false); return; }
       if (this.tool === "hand" || !this._startTool(e, ptr, false)) this._startPan(ptr, true);
@@ -1015,6 +1045,10 @@ export class Viewer {
   _endPan(a, ptr, cancelled) {
     const t = now();
     const moved = Math.hypot(ptr.x - ptr.x0, ptr.y - ptr.y0);
+    if (!cancelled && !a.resumed && (this.placing || this.tool === "sign") && moved < (ptr.type === "touch" ? 12 : 6) && t - ptr.t0 < 450) {
+      this._signTap(ptr);
+      return;
+    }
     if (!cancelled && !a.resumed && ptr.type === "touch" && moved < 12 && t - ptr.t0 < 300) {
       this._tap(ptr);
       return;
@@ -1333,16 +1367,26 @@ export class Viewer {
     this._commitAdd(a.page, { type: "Ink", color: a.color, opacity: 0.4, width: a.width, ink: [pts] });
   }
 
-  // ---- box
+  // ---- box tool: box, line, arrow, cloud, callout and text
   _startBox(base, p) {
     const st = this.styles.box;
-    this.action = { ...base, kind: "box", start: p, end: p, color: st.color.slice(), width: st.width };
+    this.action = { ...base, kind: "box", shape: this.shape, start: p, end: p, moved: false, color: st.color.slice(), width: st.width };
     this._drawBoxPreview(this.action);
   }
 
   _moveBox(a, e) {
-    a.end = this._clampToPage(a.page, this._clientToPage(a.page, e.clientX, e.clientY));
+    let q = this._clampToPage(a.page, this._clientToPage(a.page, e.clientX, e.clientY));
+    if (e.shiftKey && (a.shape === "line" || a.shape === "arrow")) q = this._snap45(a.page, a.start, q);
+    a.end = q;
+    if (this._screenDist(a.page, a.start, q) > 5) a.moved = true;
     this._drawBoxPreview(a);
+  }
+
+  _snap45(i, from, p) {
+    const dx = p[0] - from[0], dy = p[1] - from[1], step = Math.PI / 4;
+    const ang = Math.round(Math.atan2(dy, dx) / step) * step;
+    const len = dx * Math.cos(ang) + dy * Math.sin(ang);
+    return this._clampToPage(i, [from[0] + len * Math.cos(ang), from[1] + len * Math.sin(ang)]);
   }
 
   _boxRect(a) {
@@ -1351,22 +1395,297 @@ export class Viewer {
     return [x0, y0, x1, y1];
   }
 
+  // Open arrowhead at b for a line from a to b (page units).
+  _arrowHead(a, b, w) {
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), L = Math.max(6, w * 4.5), s = Math.PI / 7;
+    const p1 = [b[0] - L * Math.cos(ang - s), b[1] - L * Math.sin(ang - s)];
+    const p2 = [b[0] - L * Math.cos(ang + s), b[1] - L * Math.sin(ang + s)];
+    return `M${p1[0]} ${p1[1]}L${b[0]} ${b[1]}L${p2[0]} ${p2[1]}`;
+  }
+
   _drawBoxPreview(a) {
     const s = this._state(a.page);
     s.prevInk.textContent = "";
-    const [x0, y0, x1, y1] = this._boxRect(a);
-    svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: "none", stroke: cssColor(a.color), "stroke-width": a.width }, s.prevInk);
+    const col = cssColor(a.color), w = a.width, g = s.prevInk;
+    const stroke = { fill: "none", stroke: col, "stroke-width": w, "stroke-linecap": "round", "stroke-linejoin": "round" };
+    if (a.shape === "line" || a.shape === "arrow") {
+      if (!a.moved) return;
+      svgEl("path", { ...stroke, d: `M${a.start[0]} ${a.start[1]}L${a.end[0]} ${a.end[1]}` + (a.shape === "arrow" ? this._arrowHead(a.start, a.end, w) : "") }, g);
+    } else if (a.shape === "callout") {
+      if (!a.moved) return;
+      svgEl("path", { ...stroke, "stroke-width": Math.min(w, 2), d: `M${a.end[0]} ${a.end[1]}L${a.start[0]} ${a.start[1]}` + this._arrowHead(a.end, a.start, Math.min(w, 2)) }, g);
+      const sz = this.textStyle.size;
+      svgEl("rect", { class: "dash", x: a.end[0], y: a.end[1] - sz, width: sz * 8, height: sz * 2, fill: "none", stroke: col, "stroke-width": 1 / this.scale }, g);
+    } else if (a.shape === "text") {
+      if (!a.moved) return;
+      const [x0, , x1] = this._boxRect(a);
+      svgEl("rect", { class: "dash", x: x0, y: a.start[1], width: x1 - x0, height: this.textStyle.size * 1.4, fill: "none", stroke: col, "stroke-width": 1 / this.scale }, g);
+    } else {
+      const [x0, y0, x1, y1] = this._boxRect(a);
+      const r = svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: "none", stroke: col, "stroke-width": w }, g);
+      if (a.shape === "cloud") r.setAttribute("class", "cloud-prev");
+    }
   }
 
   _finishBox(a, cancel) {
     const s = this._state(a.page);
     s.prevInk.textContent = "";
     if (cancel) return;
+    const k = a.shape;
+    if (k === "text" || k === "callout") { this._openTextEditor(a); return; }
+    if (k === "line" || k === "arrow") {
+      if (this._screenDist(a.page, a.start, a.end) < 6) return;
+      this._commitAdd(a.page, { type: "Line", shape: { k }, pts: [a.start.map(round2), a.end.map(round2)], color: a.color, opacity: 1, width: a.width });
+      return;
+    }
     const [x0, y0, x1, y1] = this._boxRect(a);
     if ((x1 - x0) * this.scale < 4 || (y1 - y0) * this.scale < 4) return;
     const h = a.width / 2;
-    const r = [x0 - h, y0 - h, x1 + h, y1 + h].map((v) => Math.round(v * 100) / 100);
-    this._commitAdd(a.page, { type: "Square", color: a.color, opacity: 1, width: a.width, rect: r, fill: [] });
+    const r = [x0 - h, y0 - h, x1 + h, y1 + h].map(round2);
+    if (k === "cloud") this._commitAdd(a.page, { type: "Square", shape: { k }, rect: r, color: a.color, opacity: 1, width: a.width });
+    else this._commitAdd(a.page, { type: "Square", color: a.color, opacity: 1, width: a.width, rect: r, fill: [] });
+  }
+
+  // ---- text boxes and callouts: type straight onto the page
+  _openTextEditor(a) {
+    const i = a.page, P = this.doc.pages[i], ts = this.textStyle, size = ts.size;
+    const callout = a.shape === "callout";
+    const bw = callout ? Math.min(2, a.width) : 0;
+    const fill = (callout ? ts.fillCallout : ts.fillText) ? [1, 1, 1] : [];
+    const lineH = size * 1.2, firstMid = bw + 1.5 + size * 0.6;
+    let W, x, y, pts = null;
+    if (callout) {
+      const tip = a.start;
+      let end = a.end;
+      if (!a.moved) end = this._clampToPage(i, [tip[0] + 40 / this.scale, tip[1] - 40 / this.scale]);
+      W = Math.min(size * 16, P.w * 0.6);
+      const right = end[0] >= tip[0];
+      x = clamp(right ? end[0] : end[0] - W, P.x0, P.x1 - W);
+      y = clamp(end[1] - firstMid, P.y0, P.y1 - lineH - 2 * bw - 3);
+      const attach = [right ? x : x + W, y + firstMid];
+      const K = Math.min(36, Math.abs(attach[0] - tip[0]) * 0.35);
+      pts = K >= 2 ? [tip, [attach[0] + (right ? -K : K), attach[1]], attach] : [tip, attach];
+      pts = pts.map((p) => p.map(round2));
+    } else {
+      const [x0, , x1] = this._boxRect(a);
+      W = a.moved && (x1 - x0) >= size * 3 ? x1 - x0 : Math.min(size * 16, P.w * 0.6);
+      x = clamp(a.moved ? x0 : a.start[0], P.x0, P.x1 - W);
+      y = clamp(a.start[1] - (a.moved ? 0 : firstMid), P.y0, P.y1 - lineH - 3);
+    }
+    const s = this._state(i);
+    const box = el("div", "text-edit", s.el);
+    box.style.left = ((x - P.x0) / P.w) * 100 + "%";
+    box.style.top = ((y - P.y0) / P.h) * 100 + "%";
+    box.style.width = (W / P.w) * 100 + "%";
+    const ta = el("textarea", "", box);
+    ta.spellcheck = true;
+    ta.placeholder = callout ? "Callout text" : "Type text";
+    const col = cssColor(a.color);
+    ta.style.setProperty("--ts", size + "px");
+    ta.style.setProperty("--tb", bw + "px");
+    ta.style.color = col;
+    ta.style.borderColor = bw ? col : "";
+    ta.classList.toggle("bordered", !!bw);
+    ta.classList.toggle("filled", !!fill.length);
+    const bar = el("div", "te-bar", box);
+    bar.innerHTML = `<button class="btn" data-act="cancel">Cancel</button><button class="btn primary" data-act="done">Done</button>`;
+    box.addEventListener("pointerdown", (e) => e.stopPropagation());
+    bar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (b) this._closeEditor(b.dataset.act === "done");
+    });
+    ta.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); this._closeEditor(false); }
+      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this._closeEditor(true); }
+    });
+    if (pts) {
+      const lw = Math.max(bw, 1);
+      const d = "M" + pts.map((p) => p.join(" ")).join("L") + this._arrowHead(pts[1], pts[0], lw);
+      svgEl("path", { d, fill: "none", stroke: col, "stroke-width": lw, "stroke-linecap": "round", "stroke-linejoin": "round" }, s.prevInk);
+    }
+    this.editor = { page: i, kind: a.shape, x, y, W, size, bw, fill, color: a.color.slice(), callout: pts, el: box, ta };
+    this.cb.onEditing?.(true);
+    setTimeout(() => ta.focus(), 0);
+  }
+
+  get editing() { return !!this.editor; }
+
+  _closeEditor(commit) {
+    const E = this.editor;
+    if (!E) return;
+    this.editor = null;
+    E.el.remove();
+    const s = this.doc?.states.get(E.page);
+    if (s) s.prevInk.textContent = "";
+    this.cb.onEditing?.(false);
+    const text = E.ta.value.replace(/\s+$/, "");
+    if (!commit || !text.trim() || !this.doc) return;
+    const lines = text.split("\n").length;
+    const rect = [E.x, E.y, E.x + E.W, E.y + lines * E.size * 1.2 + 2 * E.bw + 3].map(round2);
+    const d = { type: "FreeText", shape: { k: E.kind }, text, size: E.size, color: E.color, fill: E.fill, width: E.bw, rect, opacity: 1 };
+    if (E.callout) d.callout = E.callout;
+    this._commitAdd(E.page, d);
+  }
+
+  // Finish typing (e.g. before saving).
+  commitEdits() { this._closeEditor(true); }
+
+  // ---- signatures
+  // sig: { href, png, aspect (height / width) }. With `replace`, an existing
+  // signature is being moved/resized.
+  placeSignature(sig, { page, center, width, replace, replacePage } = {}) {
+    if (!this.doc) return;
+    this._closeEditor(true);
+    this.finishPlacing(false);
+    const i = clamp(page ?? this.currentPage(), 0, this.doc.pages.length - 1);
+    const P = this.doc.pages[i];
+    let rect;
+    if (replace) rect = replace.rect.slice();
+    else {
+      let w = Math.min(width || 150, P.w * 0.5), h = w * sig.aspect;
+      if (h > P.h * 0.4) { h = P.h * 0.4; w = h / sig.aspect; }
+      let c = center;
+      if (!c) {
+        const L = this.L;
+        const vx0 = Math.max(this.sx, L.left[i]), vx1 = Math.min(this.sx + this.vw, L.left[i] + L.W[i]);
+        const vy0 = Math.max(this.sy, L.top[i]), vy1 = Math.min(this.sy + this.vh, L.top[i] + L.H[i]);
+        c = vx1 > vx0 && vy1 > vy0 ? this._worldToPage(i, (vx0 + vx1) / 2, (vy0 + vy1) / 2) : [P.x0 + P.w / 2, P.y0 + P.h / 2];
+      }
+      rect = [c[0] - w / 2, c[1] - h / 2, c[0] + w / 2, c[1] + h / 2];
+    }
+    this.placing = { sig, page: i, rect, replace: replace || null, replacePage: replace ? replacePage ?? i : null };
+    if (replace) this._nodes.get(replace)?.setAttribute("visibility", "hidden");
+    this._clampPlacing();
+    this._renderPlacing();
+    this.placeBar.hidden = false;
+    this.cb.onPlacing?.(true);
+  }
+
+  // Move or resize a signature already on the page.
+  async adjustSignature(i, d) {
+    if (!d.png) {
+      const png = await this.engine.annotImage(i, () => d.id);
+      if (!png || !this.doc) return;
+      d.png = png;
+    }
+    if (!d.href) d.href = URL.createObjectURL(new Blob([d.png], { type: "image/png" }));
+    const [x0, y0, x1, y1] = d.rect;
+    this.placeSignature({ href: d.href, png: d.png, aspect: (y1 - y0) / Math.max(1e-6, x1 - x0) }, { page: i, replace: d, replacePage: i });
+  }
+
+  _clampPlacing() {
+    const pl = this.placing, P = this.doc.pages[pl.page];
+    let [x0, y0, x1, y1] = pl.rect;
+    let w = x1 - x0, h = y1 - y0;
+    const f = Math.min(1, P.w / w, P.h / h);
+    w *= f; h *= f;
+    x0 = clamp(x0, P.x0, P.x1 - w);
+    y0 = clamp(y0, P.y0, P.y1 - h);
+    pl.rect = [x0, y0, x0 + w, y0 + h];
+  }
+
+  _renderPlacing() {
+    const pl = this.placing;
+    if (!pl) return;
+    const s = this._state(pl.page), P = this.doc.pages[pl.page];
+    if (!pl.el || pl.el.parentNode !== s.el) {
+      pl.el?.remove();
+      pl.el = el("div", "sig-place", s.el);
+      const img = el("img", "", pl.el);
+      img.src = pl.sig.href;
+      img.alt = "";
+      img.draggable = false;
+      for (const c of ["nw", "ne", "sw", "se"]) el("div", "sp-h " + c, pl.el).dataset.h = c;
+      pl.el.addEventListener("pointerdown", (e) => this._placeDown(e));
+    }
+    const [x0, y0, x1, y1] = pl.rect, st = pl.el.style;
+    st.left = ((x0 - P.x0) / P.w) * 100 + "%";
+    st.top = ((y0 - P.y0) / P.h) * 100 + "%";
+    st.width = ((x1 - x0) / P.w) * 100 + "%";
+    st.height = ((y1 - y0) / P.h) * 100 + "%";
+  }
+
+  _placeDown(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    const pl = this.placing;
+    if (!pl) return;
+    if (e.pointerType === "touch" && now() - this.lastPen < PALM_MS) return;
+    if (e.pointerType === "pen") this.lastPen = now();
+    const target = pl.el, h = e.target.dataset?.h || null;
+    try { target.setPointerCapture(e.pointerId); } catch {}
+    target.classList.add("dragging");
+    const sx = e.clientX, sy = e.clientY, r0 = pl.rect.slice(), aspect = (r0[3] - r0[1]) / (r0[2] - r0[0]);
+    const move = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      const dx = (ev.clientX - sx) / this.scale, dy = (ev.clientY - sy) / this.scale;
+      const [x0, y0, x1, y1] = r0;
+      if (!h) pl.rect = [x0 + dx, y0 + dy, x1 + dx, y1 + dy];
+      else {
+        // Resize from the opposite corner, keeping the proportions.
+        const ax = h.includes("w") ? x1 : x0, ay = h.includes("n") ? y1 : y0;
+        const px = (h.includes("w") ? x0 : x1) + dx, py = (h.includes("n") ? y0 : y1) + dy;
+        const w = Math.max(16 / this.scale, 8, Math.abs(px - ax), Math.abs(py - ay) / aspect), hh = w * aspect;
+        const nx = h.includes("w") ? ax - w : ax, ny = h.includes("n") ? ay - hh : ay;
+        pl.rect = [nx, ny, nx + w, ny + hh];
+      }
+      this._clampPlacing();
+      this._renderPlacing();
+    };
+    const up = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      target.classList.remove("dragging");
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", up);
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+    target.addEventListener("pointercancel", up);
+  }
+
+  _signTap(ptr) {
+    const [wx, wy] = this._toWorld(ptr.x, ptr.y);
+    const i = this._hitPage(wx, wy, 0);
+    if (i < 0) return;
+    const p = this._worldToPage(i, wx, wy);
+    const pl = this.placing;
+    if (pl) {
+      if (pl.replace && i !== pl.page) return; // a moved signature stays on its page
+      const w = pl.rect[2] - pl.rect[0], h = pl.rect[3] - pl.rect[1];
+      pl.page = i;
+      pl.rect = [p[0] - w / 2, p[1] - h / 2, p[0] + w / 2, p[1] + h / 2];
+      this._clampPlacing();
+      this._renderPlacing();
+      return;
+    }
+    const hit = (this.doc.annots.get(i) || []).slice().reverse().find((d) => d.shape?.k === "sig" && this._hitAnnot(d, p, 4 / this.scale));
+    this.cb.onSignTap?.(i, p, hit || null);
+  }
+
+  // Place (true) or drop (false) the signature being positioned.
+  finishPlacing(place) {
+    const pl = this.placing;
+    if (!pl) return;
+    this.placing = null;
+    pl.el?.remove();
+    this.placeBar.hidden = true;
+    const old = pl.replace;
+    if (old) this._nodes.get(old)?.removeAttribute("visibility");
+    this.cb.onPlacing?.(false);
+    if (!place || !this.doc) return;
+    const rect = pl.rect.map(round2);
+    if (old && pl.page === pl.replacePage && rect.every((v, k) => Math.abs(v - old.rect[k]) < 0.01)) return;
+    const d = { type: "Stamp", shape: { k: "sig" }, rect, png: pl.sig.png, href: pl.sig.href, color: [], opacity: 1 };
+    if (old) {
+      this._removeAnnot(pl.replacePage, old);
+      this._insertAnnot(pl.page, d);
+      this._pushHistory([{ op: "del", page: pl.replacePage, data: old }, { op: "add", page: pl.page, data: d }]);
+    } else {
+      this._commitAdd(pl.page, d);
+    }
+    this.cb.onSigned?.(pl.sig, rect);
   }
 
   // ---- eraser
@@ -1405,6 +1724,29 @@ export class Viewer {
 
   _hitAnnot(d, p, tol) {
     const [x, y] = p;
+    if (d.shape) {
+      const k = d.shape.k, w = d.width || 1;
+      if (k === "line" || k === "arrow") {
+        const [a, b] = d.pts;
+        return distSeg(x, y, a[0], a[1], b[0], b[1]) <= tol + w / 2 + (k === "arrow" ? 2 : 0);
+      }
+      const r = d.rect || d.bounds;
+      if (!r) return false;
+      if (k === "callout" && d.callout) {
+        for (let j = 1; j < d.callout.length; j++) {
+          const a = d.callout[j - 1], b = d.callout[j];
+          if (distSeg(x, y, a[0], a[1], b[0], b[1]) <= tol + 1) return true;
+        }
+      }
+      if (k === "cloud") {
+        // Like a box: touch the (bumpy) border.
+        const m = tol + w / 2 + 5;
+        const inside = x >= r[0] + m && x <= r[2] - m && y >= r[1] + m && y <= r[3] - m;
+        return !inside && x >= r[0] - m && x <= r[2] + m && y >= r[1] - m && y <= r[3] + m;
+      }
+      // Text, callout box and signature: anywhere inside.
+      return x >= r[0] - tol && x <= r[2] + tol && y >= r[1] - tol && y <= r[3] + tol;
+    }
     if (d.measure) {
       const pts = d.pts, r = tol + 2 / this.scale;
       const closed = d.type === "Polygon";
@@ -1885,7 +2227,10 @@ export class Viewer {
   _drawAnnot(i, d) {
     const s = this._state(i);
     let node;
-    if (d.type === "Ink") {
+    if (d.shape) {
+      node = this._shapeNode(d);
+      s.svgInk.insertBefore(node, s.prevInk);
+    } else if (d.type === "Ink") {
       const path = d.ink.map((st) => "M" + st.map((p) => p[0] + " " + p[1]).join("L")).join("");
       node = svgEl("path", { d: path, fill: "none", stroke: cssColor(d.color), "stroke-width": d.width || 1, "stroke-linecap": "round", "stroke-linejoin": "round" });
       if (d.opacity < 1) node.setAttribute("opacity", d.opacity);
@@ -1906,11 +2251,62 @@ export class Viewer {
     if (node) this._nodes.set(d, node);
   }
 
+  // Shapes are drawn from MuPDF's SVG of their saved appearance. Until that
+  // arrives (a few ms after creating one) a close approximation stands in.
+  _shapeNode(d) {
+    const k = d.shape.k;
+    if (k === "sig" && (d.href || d.png)) {
+      if (!d.href) d.href = URL.createObjectURL(new Blob([d.png], { type: "image/png" }));
+      const [x0, y0, x1, y1] = d.rect;
+      return svgEl("image", { class: "shape", href: d.href, x: x0, y: y0, width: x1 - x0, height: y1 - y0, preserveAspectRatio: "none" });
+    }
+    const g = svgEl("g", { class: "shape" });
+    if (d.svg) { g.innerHTML = d.svg; return g; }
+    const col = cssColor(d.color), w = d.width || 1;
+    const stroke = { fill: "none", stroke: col, "stroke-width": w, "stroke-linecap": "round", "stroke-linejoin": "round" };
+    if (k === "line" || k === "arrow") {
+      const [a, b] = d.pts;
+      svgEl("path", { ...stroke, d: `M${a[0]} ${a[1]}L${b[0]} ${b[1]}` + (k === "arrow" ? this._arrowHead(a, b, w) : "") }, g);
+    } else if (k === "cloud") {
+      const [x0, y0, x1, y1] = d.rect;
+      svgEl("rect", { ...stroke, class: "cloud-prev", x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, g);
+    } else if (k === "text" || k === "callout") {
+      const [x0, y0, x1, y1] = d.rect, bw = d.width || 0;
+      if (d.callout) {
+        const lw = Math.max(bw, 1);
+        svgEl("path", { ...stroke, "stroke-width": lw, d: "M" + d.callout.map((p) => p.join(" ")).join("L") + this._arrowHead(d.callout[1], d.callout[0], lw) }, g);
+      }
+      if (bw || (d.fill && d.fill.length)) svgEl("rect", { x: x0 + bw / 2, y: y0 + bw / 2, width: x1 - x0 - bw, height: y1 - y0 - bw, fill: d.fill && d.fill.length ? cssColor(d.fill) : "none", stroke: bw ? col : "none", "stroke-width": bw }, g);
+      const t = svgEl("text", { x: x0 + bw / 2 + 2, y: y0 + bw + d.size, fill: col, "font-size": d.size, "font-family": "Helvetica, Arial, sans-serif" }, g);
+      d.text.split("\n").forEach((line, j) => {
+        const sp = svgEl("tspan", { x: x0 + bw / 2 + 2, y: y0 + bw + d.size * (0.95 + j * 1.2) }, t);
+        sp.textContent = line;
+      });
+    }
+    return g;
+  }
+
+  // MuPDF's drawing of a just-created shape has arrived: swap it in.
+  _annotReady(d) {
+    if (!d.shape || !d.svg || (d.shape.k === "sig" && d.href)) return;
+    const old = this._nodes.get(d);
+    if (!old || !old.parentNode) return;
+    const n = this._shapeNode(d);
+    if (old.getAttribute("visibility")) n.setAttribute("visibility", old.getAttribute("visibility"));
+    old.replaceWith(n);
+    this._nodes.set(d, n);
+  }
+
   get _nodes() {
     return (this.__nodes ||= new WeakMap());
   }
 
   _payload(d) {
+    if (d.shape) {
+      const o = { type: d.type, shape: d.shape, color: d.color, opacity: d.opacity, width: d.width };
+      for (const k of ["pts", "rect", "text", "size", "fill", "callout", "png"]) if (d[k] != null) o[k] = d[k];
+      return o;
+    }
     const o = { type: d.type, color: d.color, opacity: d.opacity, width: d.width };
     if (d.ink) o.ink = d.ink;
     if (d.rect) o.rect = d.rect;
@@ -1924,9 +2320,12 @@ export class Viewer {
     const doc = this.doc;
     if (!doc.annots.has(i)) doc.annots.set(i, []);
     doc.annots.get(i).push(d);
+    if (d.shape) d.svg = null; // redrawn from the new annotation's appearance
     this._drawAnnot(i, d);
     d.id = 0;
-    this.engine.addAnnot(i, this._payload(d), d);
+    this.engine.addAnnot(i, () => this._payload(d), d)
+      .then(() => this._annotReady(d))
+      .catch((err) => this.cb.onError?.("Couldn't add that annotation: " + err.message));
   }
 
   _removeAnnot(i, d) {
@@ -1935,6 +2334,8 @@ export class Viewer {
     if (k >= 0) list.splice(k, 1);
     this._nodes.get(d)?.remove();
     this._nodes.delete(d);
+    // A signature loaded from the file: keep its image so undo can restore it.
+    if (d.shape?.k === "sig" && !d.png) this.engine.annotImage(i, () => d.id).then((png) => { if (png) d.png = png; }).catch(() => {});
     this.engine.deleteAnnot(i, () => d.id);
   }
 
@@ -1961,6 +2362,8 @@ export class Viewer {
 
   undo() {
     const d = this.doc;
+    if (this.editor) { this._closeEditor(false); return; }
+    if (this.placing) { this.finishPlacing(false); return; }
     if (!d || this.action || !d.undo.length) return;
     const h = d.undo.pop();
     this._apply(h.ops, true);

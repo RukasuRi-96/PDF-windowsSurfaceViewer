@@ -1,10 +1,10 @@
 # Inkleaf PDF
 
-A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, lets you highlight, write and draw on them, copy text, and measure distances and areas on scaled drawings. Everything you add is saved into the PDF itself.
+A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. Everything you add is saved into the PDF itself.
 
 ![Inkleaf PDF measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.1.0** · Windows 10 or 11, 64-bit
+**Current version: 1.2.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -16,7 +16,7 @@ A fast PDF reader and markup app for Windows tablets like the Surface Pro, for t
 
 You need Windows 10 or 11 on a 64-bit Intel or AMD PC, such as a Surface Pro 9 with an Intel Core i5 or i7. You also need an internet connection while setup runs, and you don't need administrator rights.
 
-1. Download **`InkleafPDF-Setup.zip`** (about 5 MB) from the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases/latest). Don't use the green **Code → Download ZIP** button; that gives you the source code, not the installer.
+1. Download **`InkleafPDF-Setup.zip`** (about 5 MB) from the [`downloads` folder](downloads/InkleafPDF-Setup.zip): open it and click the **Download raw file** button (↓) at the top right. Don't use the green **Code → Download ZIP** button; that gives you the source code, not the installer.
 2. Right-click the zip and choose **Extract All…**, then **Extract**. Setup doesn't work from inside the zip.
 3. The extracted folder holds **Install Inkleaf PDF**, **README** and a **files** folder. Double-click **Install Inkleaf PDF**.
    - Its full name is `Install Inkleaf PDF.cmd`, but Windows usually hides the `.cmd` ending.
@@ -84,8 +84,9 @@ The toolbar in the middle holds the tools:
 | **Pan** | H | Drag to move around. |
 | **Highlight** | M | Snaps to the text you sweep over. Where there's no text, it becomes a freehand marker. |
 | **Pen** | P | Write or draw freehand. |
-| **Box** | B | Draw a rectangle. |
-| **Eraser** | E | Removes the ink, boxes, highlights and measurements you touch. |
+| **Shapes** | B | Box, line, arrow, cloud, callout or text. Tap the tool again (or its small ▾) to choose. See [Shapes, text and callouts](#4-shapes-text-and-callouts). |
+| **Signature** | S | Place your signature, with its background removed. See [Sign](#5-sign). |
+| **Eraser** | E | Removes the ink, shapes, text, signatures, highlights and measurements you touch. |
 | **Measure** | R | Distance, path length and area at the drawing's scale (see below). |
 
 - **Colors and thickness:** tap the active tool again, or tap the colored dot next to the tools.
@@ -94,7 +95,43 @@ The toolbar in the middle holds the tools:
 - **Palm rejection:** your palm is ignored while the pen is near the screen.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the arrows in the toolbar.
 
-### 4. Select and copy text
+### 4. Shapes, text and callouts
+
+Choose the **Shapes** tool (**B**), then tap it again (or its small ▾) to pick a shape, its color and its thickness.
+
+| Shape | How to draw it |
+|---|---|
+| **Box** | Drag from corner to corner. |
+| **Line** / **Arrow** | Drag from start to end; the arrow points where you finish. **Shift** keeps it at 0°, 45° or 90°. |
+| **Cloud** | Drag from corner to corner. Good for marking revisions on drawings. |
+| **Callout** | Drag from the spot you're pointing at to where the text should go, then type. The leader line and arrow are added for you. |
+| **Text** | Tap where the text should start, or drag to set how wide it is, then type. |
+
+- While typing, **Enter** starts a new line. Click **Done**, press **Ctrl+Enter**, or tap anywhere else on the page to finish. **Esc** or **Cancel** throws the text away.
+- Long text wraps to the box's width, and the box grows to fit.
+- For text and callouts, the same menu sets the **text size** (9, 12, 18 or 28 pt) and an optional **white background**, which keeps text readable on busy drawings.
+- Text in other languages works too, including accented letters and Chinese.
+
+### 5. Sign
+
+1. Choose **Signature** (**S**). The signature panel opens.
+2. The first time, click **Add signature from file…** and pick a photo or scan of your signature (PNG, JPG, GIF, BMP or WebP). You can also drag an image file onto the window.
+3. In **Prepare signature**:
+   - the paper background is removed automatically;
+   - move the **Remove background** slider right to remove more (paper texture, shadows, ruled lines) or left to keep faint strokes, and **Auto** goes back to the automatic setting;
+   - choose the ink colour (as in the image, black or blue) and check the result on a transparent or white background;
+   - click **Use signature**. It's saved to **My signatures** for next time.
+4. The signature appears on the page with a dashed frame. **Drag it** to move it, **drag a corner** to resize it (it keeps its proportions), or **tap the page** to move it there. Click **Place** (or press **Enter**). **Cancel** (or **Esc**) drops it.
+
+Next time:
+- tap a signature in **My signatures** to place it, or, with the Signature tool, just **tap the page** to place your last signature there at the size you used last;
+- to move or resize a signature already on the page, **tap it** with the Signature tool;
+- keep signature images in a folder and click **Choose folder…** in the panel: its images are listed there too, and picking one goes through **Prepare signature**;
+- to remove a signature from **My signatures**, hover over it (or tap) and click its **×**. Signatures already placed in PDFs stay.
+
+Signatures are saved in the PDF as stamp annotations with a transparent image, so they look the same in Acrobat, Edge and other PDF apps.
+
+### 6. Select and copy text
 
 1. Choose **Select** (**V**).
 2. Drag over the text you want. A selection can run across several pages, and it scrolls the page when you drag near the edge.
@@ -105,7 +142,7 @@ The toolbar in the middle holds the tools:
 
 Click on blank paper or press **Esc** to clear the selection.
 
-### 5. Measure drawings
+### 7. Measure drawings
 
 1. **Choose Measure** (**R**). A measuring bar appears at the bottom of the page.
 2. **Set the drawing's scale.** Click the scale button on the left of the measuring bar. It says *Scale not set* until you set one.
@@ -131,7 +168,7 @@ Each measurement is saved into the PDF as a standard PDF measurement markup, wit
 
 > A measurement is only as accurate as the scale. For drawings marked *NTS* (not to scale), or ones that may have been printed or scanned at a different size, calibrate against a known dimension first.
 
-### 6. Save
+### 8. Save
 
 - **Ctrl+S** (or the save button) writes your markups into the PDF as standard annotations. Acrobat, Edge, Bluebeam and other PDF apps show them too.
 - **Ctrl+Shift+S** saves a copy under a new name.
@@ -144,12 +181,15 @@ In the app, **⋯ → Keyboard & touch help** shows this list.
 
 | Keys | Action |
 |---|---|
-| V · H · M · P · B · E · R | Select · Pan · Highlight · Pen · Box · Eraser · Measure |
+| V · H · M · P · B · S · E · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Measure |
 | T | Finger draws on/off |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Ctrl+C / Ctrl+A | Copy selected text / Select all text on the page |
 | Enter · Backspace · Esc | Finish · remove last point · cancel (while measuring) |
+| Ctrl+Enter · Esc | Finish · cancel a text box or callout you're typing |
+| Enter · Esc | Place · cancel the signature you're positioning |
+| Shift (while drawing a line or arrow) | Keep it at 0°, 45° or 90° |
 | Ctrl + / Ctrl − / Ctrl+0 / Ctrl+9 | Zoom in / out / fit width / fit page |
 | PgUp / PgDn / Space | Scroll a screen |
 | Home / End | First / last page |
@@ -166,6 +206,8 @@ In the app, **⋯ → Keyboard & touch help** shows this list.
 | Setup says it couldn't download, or the safety check failed | Check your internet connection and run **Install Inkleaf PDF** again. If your network blocks github.com, use `InkleafPDF-win-x64.zip` and `Install.cmd` instead (see [Other ways to install](#other-ways-to-install)). |
 | *"Couldn't save"* | The file may be open in another app, or in a read-only or locked folder. Use **Save as…** to save a copy somewhere else. |
 | Measurements look wrong | Check the scale on the measuring bar. *Scale not set* means 1:1 (real paper size). Set the scale or calibrate. |
+| Some of the paper is still visible around a signature | Tap the Signature tool, add the image again, and move **Remove background** further right. Photos with shadows usually need more. |
+| Part of a signature is missing | Move **Remove background** further left, or choose **Black** or **Blue** ink so faint strokes become solid. |
 | A finger draws instead of panning | The finger button (**T**) is on. Tap it to turn it off. |
 | The mouse wheel zooms when you want it to scroll (or the reverse) | **⋯ → Mouse wheel scrolls / Mouse wheel zooms** |
 
@@ -181,11 +223,14 @@ Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with
 | `app/engine.js` | Worker pool and priority render queue. The viewer replaces the queue on every view change, so stale work gets dropped. |
 | `app/viewer.js` | Continuous page layout. Pan and pinch run as GPU transforms, and the pages are re-tiled at the new resolution once a gesture settles. Annotations are live SVG vectors, so drawing never forces a page re-render. Also handles text selection and the measuring tool. |
 | `app/measure.js` | Drawing scales, units, label formatting and polygon geometry for the measuring tool. |
+| `app/sigproc.js` | Signature background removal: paper colour from the image border, automatic threshold (Otsu), soft edges, paper-tint removal at stroke edges, ink recolouring, crop and PNG export. |
 | `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. |
 | `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, and the open/save flow. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
 | `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Inkleaf PDF.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
 | `tools/devserver.js` | Runs the same UI in a normal browser for testing. |
+
+Shapes are standard annotations: box and cloud are `Square` (the cloud uses the PDF's cloudy border effect), line and arrow are `Line`, text and callout are `FreeText` (the callout uses the `FreeTextCallout` intent with a callout line), and signatures are `Stamp` annotations with a transparent image. Each one Inkleaf creates carries an `InkleafShape` key. The viewer draws those from MuPDF's own SVG of the saved appearance, so what you see is exactly what other apps see. Text boxes are sized to the number of lines MuPDF wraps the text into.
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
 

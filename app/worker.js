@@ -12,6 +12,12 @@ const MEASURE_TYPES = new Set(["Line", "PolyLine", "Polygon"]);
 const MEASURE_KEY = "InkleafMeasure";
 const MEASURE_INTENT = { Line: "LineDimension", PolyLine: "PolyLineDimension", Polygon: "PolygonDimension" };
 const MEASURE_SUBJECT = { Line: "Length Measurement", PolyLine: "Length Measurement", Polygon: "Area Measurement" };
+// Lines, arrows, clouds, text boxes, callouts and signatures Inkleaf created
+// carry this key (JSON { v, k: kind, ... }). They are drawn live from MuPDF's
+// own SVG of their appearance, so the screen matches the saved file exactly.
+// Anyone else's annotations of these types are left to MuPDF.
+const SHAPE_KEY = "InkleafShape";
+const SHAPE_TYPES = new Set(["Line", "Square", "FreeText", "Stamp"]);
 const LIST_CACHE_SIZE = 6;
 
 let doc = null;
@@ -53,14 +59,27 @@ function measureInfo(a) {
   }
 }
 
+function shapeInfo(a) {
+  try {
+    const v = a.getObject().get(SHAPE_KEY);
+    if (!v || !v.isString()) return null;
+    const info = JSON.parse(v.asString());
+    return info && typeof info === "object" && typeof info.k === "string" ? info : null;
+  } catch {
+    return null;
+  }
+}
+
 function isManaged(a) {
   try {
     const type = a.getType();
-    if (!MANAGED_TYPES.has(type)) return false;
-    if (MEASURE_TYPES.has(type) && !measureInfo(a)) return false;
+    const shape = SHAPE_TYPES.has(type) ? shapeInfo(a) : null;
+    if (!MANAGED_TYPES.has(type) && !shape) return false;
+    if (MEASURE_TYPES.has(type) && !shape && !measureInfo(a)) return false;
     const f = a.getFlags();
     if (f & (PDFAnnotation.IS_HIDDEN | PDFAnnotation.IS_NO_VIEW | PDFAnnotation.IS_LOCKED | PDFAnnotation.IS_READ_ONLY)) return false;
     if (a.getObject().asIndirect() <= 0) return false;
+    if (shape) return true;
     if (a.hasBorder()) {
       if (a.getBorderStyle() !== "Solid") return false;
       if (a.getBorderDashCount() > 0) return false;
@@ -134,9 +153,54 @@ function colorOf(c) {
   return Array.isArray(c) ? Array.from(c) : [];
 }
 
+// MuPDF's own vector drawing of an annotation, as SVG markup in page
+// coordinates. Element ids get a unique prefix so many can share one page.
+let svgSeq = 0;
+function annotSvg(a) {
+  const buf = new mupdf.Buffer();
+  try {
+    const w = new mupdf.DocumentWriter(buf, "svg", "text=path");
+    const dev = w.beginPage(a.getBounds());
+    try { a.run(dev, mupdf.Matrix.identity); } finally { w.endPage(); w.close(); }
+    let s = buf.asString();
+    s = s.slice(s.indexOf(">", s.indexOf("<svg")) + 1, s.lastIndexOf("</svg>"));
+    const p = "a" + (++svgSeq) + "_";
+    return s.replace(/\bid="/g, `id="${p}`).replace(/url\(#/g, `url(#${p}`).replace(/href="#/g, `href="#${p}`);
+  } finally {
+    buf.destroy();
+  }
+}
+
+function shapeData(a, type, shape, d) {
+  d.shape = shape;
+  d.bounds = Array.from(a.getBounds());
+  d.svg = annotSvg(a);
+  if (type === "Line") {
+    d.pts = a.getLine().map((p) => [p[0], p[1]]);
+    d.width = a.getBorderWidth();
+  } else if (type === "Square") {
+    d.rect = Array.from(a.getRect());
+    d.width = a.getBorderWidth();
+  } else if (type === "FreeText") {
+    const da = a.getDefaultAppearance();
+    d.rect = Array.from(a.getRect());
+    d.text = a.getContents() || "";
+    d.size = da.size || 12;
+    d.color = colorOf(da.color);
+    d.fill = colorOf(a.getColor());
+    d.width = a.getBorderWidth();
+    if (shape.k === "callout" && Array.isArray(shape.pts)) d.callout = shape.pts;
+  } else if (type === "Stamp") {
+    d.rect = Array.from(a.getRect());
+  }
+  return d;
+}
+
 function annotData(a) {
   const type = a.getType();
   const d = { id: a.getObject().asIndirect(), type, color: colorOf(a.getColor()), opacity: a.getOpacity() };
+  const shape = SHAPE_TYPES.has(type) ? shapeInfo(a) : null;
+  if (shape) return shapeData(a, type, shape, d);
   if (type === "Ink") {
     d.width = a.getBorderWidth();
     d.ink = a.getInkList().map((s) => s.map((p) => [p[0], p[1]]));
@@ -188,6 +252,71 @@ function writeMeasure(a, data) {
   m.put("D", fmt(u.label, 1, den(u.dp)));
   m.put("A", fmt(u.area, Math.pow(u.m / (u.am || u.m), 2), den(u.adp)));
   obj.put("Measure", m);
+}
+
+// Number of text lines MuPDF laid out (wrapped lines and blank lines each
+// move down once with "0 -h Td").
+function apLineCount(a) {
+  try {
+    const s = a.getObject().get("AP").get("N").readStream().asString();
+    return (s.match(/(^|\s)0 -[\d.]+ Td/g) || []).length;
+  } catch {
+    return 1;
+  }
+}
+
+function createShape(p, data) {
+  const k = data.shape.k;
+  const info = { v: 1, k };
+  let a;
+  if (k === "line" || k === "arrow") {
+    a = p.createAnnotation("Line");
+    a.setColor(data.color);
+    a.setBorderWidth(data.width);
+    a.setLine(data.pts[0], data.pts[1]);
+    a.setLineEndingStyles("None", k === "arrow" ? "OpenArrow" : "None");
+  } else if (k === "cloud") {
+    a = p.createAnnotation("Square");
+    a.setColor(data.color);
+    a.setBorderWidth(data.width);
+    a.setRect(data.rect);
+    a.setBorderEffect("Cloudy");
+    a.setBorderEffectIntensity(1);
+  } else if (k === "text" || k === "callout") {
+    a = p.createAnnotation("FreeText");
+    a.setContents(data.text);
+    a.setDefaultAppearance("Helv", data.size, data.color);
+    a.setBorderWidth(data.width);
+    if (data.fill && data.fill.length) a.setColor(data.fill);
+    if (k === "callout") {
+      a.setIntent("FreeTextCallout");
+      a.setCalloutLine(data.callout);
+      a.setCalloutStyle("OpenArrow");
+      info.pts = data.callout;
+    }
+    a.setRect(data.rect);
+  } else if (k === "sig") {
+    a = p.createAnnotation("Stamp");
+    a.setRect(data.rect);
+    const img = new mupdf.Image(data.png);
+    a.setStampImage(img);
+    a.setContents("Signature");
+  } else {
+    throw new Error("Unknown shape " + k);
+  }
+  if (author) { try { a.setAuthor(author); } catch {} }
+  a.getObject().put(SHAPE_KEY, doc.newString(JSON.stringify(info)));
+  a.update();
+  if (k === "text" || k === "callout") {
+    // Grow or shrink the box to exactly the lines MuPDF wrapped the text into.
+    const r = data.rect, bw = data.width || 0;
+    const h = Math.max(1, apLineCount(a)) * data.size * 1.2 + 2 * bw + 3;
+    a.setRect([r[0], r[1], r[2], r[1] + h]);
+    a.update();
+  }
+  const out = { id: a.getObject().asIndirect(), svg: annotSvg(a), bounds: Array.from(a.getBounds()) };
+  if (k !== "line" && k !== "arrow") out.rect = Array.from(a.getRect());
+  return out;
 }
 
 function findAnnot(page, id) {
@@ -252,6 +381,7 @@ const handlers = {
   },
   addAnnot({ page, data }) {
     const p = entry(page).page;
+    if (data.shape) return { result: createShape(p, data) };
     const a = p.createAnnotation(data.type);
     if (author) { try { a.setAuthor(author); } catch {} }
     a.setColor(data.color);
@@ -279,6 +409,21 @@ const handlers = {
     }
     a.update();
     return { result: a.getObject().asIndirect() };
+  },
+  // A signature stamp as a transparent PNG (to restore it after erasing, or
+  // to move/resize one loaded from the file).
+  annotImage({ page, id }) {
+    const a = findAnnot(entry(page).page, id);
+    if (!a) return { result: null };
+    const r = a.getRect();
+    const sc = Math.max(1, Math.min(6, 1000 / Math.max(1, r[2] - r[0])));
+    const pix = a.toPixmap(mupdf.Matrix.scale(sc, sc), mupdf.ColorSpace.DeviceRGB, true);
+    try {
+      const png = pix.asPNG().slice();
+      return { result: png, transfer: [png.buffer] };
+    } finally {
+      pix.destroy();
+    }
   },
   deleteAnnot({ page, id }) {
     const p = entry(page).page;

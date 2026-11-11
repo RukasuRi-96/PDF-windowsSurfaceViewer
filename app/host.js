@@ -11,6 +11,8 @@ function devHost() {
     userName: "",
     async pickFolder() { return qs.get("folder") || prompt("Folder path"); },
     async pickFile() { return prompt("PDF path"); },
+    async pickImages() { const p = qs.get("images") || prompt("Image path"); return p ? p.split("|") : []; },
+    listImages: (dir) => fetch("/api/images?dir=" + encodeURIComponent(dir)).then(json),
     scanFolder: (dir) => fetch("/api/scan?dir=" + encodeURIComponent(dir)).then(json),
     fileUrl: (p) => "/api/file?p=" + encodeURIComponent(p) + "&t=" + Date.now(),
     stat: (p) => fetch("/api/stat?p=" + encodeURIComponent(p)).then(json),
