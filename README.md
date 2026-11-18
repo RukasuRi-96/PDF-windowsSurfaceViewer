@@ -286,7 +286,7 @@ These keys always do the same thing in their situation:
 
 ### How it's built
 
-Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders PDFs with [MuPDF](https://mupdf.com/) compiled to WebAssembly.
+Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders PDFs with [MuPDF](https://mupdf.com/) compiled to WebAssembly. 
 
 | Part | Role |
 |---|---|
