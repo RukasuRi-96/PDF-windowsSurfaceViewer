@@ -168,6 +168,7 @@ function setTool(t) {
 
 function applyStyles() {
   for (const k of ["pen", "highlight", "box"]) viewer.setStyle(k, { color: hexToRgb(cfg.styles[k].color), width: cfg.styles[k].width });
+  viewer.setStyle("pen", { pressure: cfg.styles.pen.pressure !== false });
   viewer.setMeasureStyle({ color: hexToRgb(cfg.measure.color), dp: cfg.measure.dp });
   viewer.measureMode = cfg.measure.mode;
   viewer.setShape(cfg.shape);
@@ -348,6 +349,7 @@ function openStylePopover() {
       })
       .join("")}</div>`;
   }
+  if (tool === "pen" && !selecting) html += `<label class="pop-check"><input type="checkbox" data-pressure${cfg.styles.pen.pressure !== false ? " checked" : ""}> Pen pressure changes the width</label>`;
   if (isText) html += `<p class="pop-hint">${shape === "callout" ? "Drag from the point you're marking to where the text should go, then type." : "Tap where the text should start, or drag to set its width, then type."}</p>`;
   pop.innerHTML = html;
   pop.onclick = (e) => {
@@ -368,6 +370,7 @@ function openStylePopover() {
     openStylePopover();
   };
   pop.onchange = (e) => {
+    if (e.target.dataset.pressure != null) { cfg.styles.pen.pressure = e.target.checked; applyStyles(); saveCfg(); return; }
     const k = e.target.dataset.fill;
     if (!k) return;
     cfg.textStyle[k] = e.target.checked;
@@ -892,9 +895,9 @@ async function prepareSignature(path) {
 function baseName(p) { return p ? p.split(/[\\/]/).pop() : ""; }
 
 function updateTitle() {
-  const name = state.path ? baseName(state.path).replace(/\.pdf$/i, "") : "Inkleaf PDF";
+  const name = state.path ? baseName(state.path).replace(/\.pdf$/i, "") : "Eagles PDF viewer";
   $("#title-text").textContent = name;
-  document.title = (viewer.dirty ? "• " : "") + (state.path ? name + " — Inkleaf PDF" : "Inkleaf PDF");
+  document.title = (viewer.dirty ? "• " : "") + (state.path ? name + " — Eagles PDF viewer" : "Eagles PDF viewer");
 }
 
 let viewTimer = 0;
@@ -973,7 +976,7 @@ async function openFile(path, { force = false } = {}) {
 }
 
 // Embed every markup into the pages, so it can no longer be moved, edited or
-// deleted (in Inkleaf or any other PDF app). Saved as a copy or over the file.
+// deleted (in this app or any other PDF app). Saved as a copy or over the file.
 async function embedMarkups() {
   if (!state.path || state.saving) return;
   viewer.commitEdits();

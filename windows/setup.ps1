@@ -1,8 +1,8 @@
-# Inkleaf PDF setup (per-user, no admin rights needed).
+# Eagles PDF viewer setup (per-user, no admin rights needed).
 # Downloads the official Electron runtime from GitHub, verifies its SHA-256,
-# adds the Inkleaf app (app.asar) and creates shortcuts.
+# adds the app (app.asar) and creates shortcuts.
 # Compatible with Windows PowerShell 5.1. Keep this file ASCII-only.
-# Lives in the package's "files" folder; "Install Inkleaf PDF.cmd" runs it
+# Lives in the package's "files" folder; "Install Eagles PDF viewer.cmd" runs it
 # with -FromLauncher. Run on its own ("Run with PowerShell"), it waits for
 # Enter before closing so the result can be read.
 param([switch]$FromLauncher)
@@ -17,10 +17,10 @@ $ElectronSha256 = '__ELECTRON_SHA256__'
 $onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $top = Split-Path -Parent $here
-$dest = Join-Path $env:LOCALAPPDATA 'Programs\Inkleaf PDF'
-$exe = Join-Path $dest 'InkleafPDF.exe'
+$dest = Join-Path $env:LOCALAPPDATA 'Programs\Eagles PDF viewer'
+$exe = Join-Path $dest 'EaglesPDF.exe'
 $icon = Join-Path $dest 'icon.ico'
-$zip = Join-Path ([IO.Path]::GetTempPath()) "inkleaf-electron-v$ElectronVersion-win32-x64.zip"
+$zip = Join-Path ([IO.Path]::GetTempPath()) "eaglespdf-electron-v$ElectronVersion-win32-x64.zip"
 $url = "https://github.com/electron/electron/releases/download/v$ElectronVersion/electron-v$ElectronVersion-win32-x64.zip"
 
 function Step([string]$n, [string]$text) {
@@ -50,17 +50,40 @@ function Set-RegValue([string]$key, [string]$name, $value, [string]$type) {
   New-ItemProperty -LiteralPath $key -Name $name -Value $value -PropertyType $type -Force | Out-Null
 }
 
+# Until 1.4 this app was called "Inkleaf PDF": remove that install (shortcuts,
+# Open with, Settings > Apps entry, program folder). Its settings are kept;
+# the app copies them over the first time it starts.
+function Remove-OldInkleaf {
+  Get-Process -Name 'InkleafPDF' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  if (-not $onWindows) { return }
+  foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
+    Remove-Item -LiteralPath (Join-Path $d 'Inkleaf PDF.lnk') -ErrorAction SilentlyContinue
+  }
+  $c = 'HKCU:\Software\Classes'
+  Remove-Item -LiteralPath "$c\InkleafPDF.Document" -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-ItemProperty -LiteralPath "$c\.pdf\OpenWithProgids" -Name 'InkleafPDF.Document' -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath "$c\Applications\InkleafPDF.exe" -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\InkleafPDF' -Recurse -Force -ErrorAction SilentlyContinue
+  $old = Join-Path $env:LOCALAPPDATA 'Programs\Inkleaf PDF'
+  if (Test-Path -LiteralPath $old) {
+    Start-Sleep -Milliseconds 500
+    Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host 'Removed the old "Inkleaf PDF" (now Eagles PDF viewer). Your settings are kept.'
+  }
+}
+
 try {
   Write-Host ''
-  Write-Host "Inkleaf PDF $AppVersion setup" -ForegroundColor White
+  Write-Host "Eagles PDF viewer $AppVersion setup" -ForegroundColor White
   Write-Host "Installing to: $dest"
 
   $asar = Join-Path $here 'app.asar'
   if (-not (Test-Path -LiteralPath $asar)) {
-    throw 'Some files are missing. Please extract the whole zip first (right-click InkleafPDF-Setup.zip > Extract All), then double-click "Install Inkleaf PDF" in the extracted folder.'
+    throw 'Some files are missing. Please extract the whole zip first (right-click EaglesPDF-Setup.zip > Extract All), then double-click "Install Eagles PDF viewer" in the extracted folder.'
   }
 
-  Get-Process -Name 'InkleafPDF' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Remove-OldInkleaf
+  Get-Process -Name 'EaglesPDF' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 1000
 
   # ---- 1. runtime -------------------------------------------------------
@@ -91,7 +114,7 @@ try {
   if ($code -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $dest 'electron.exe'))) {
     Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
   }
-  Rename-Item -LiteralPath (Join-Path $dest 'electron.exe') -NewName 'InkleafPDF.exe'
+  Rename-Item -LiteralPath (Join-Path $dest 'electron.exe') -NewName 'EaglesPDF.exe'
   Remove-Item -LiteralPath (Join-Path $dest 'resources\default_app.asar') -Force -ErrorAction SilentlyContinue
   Copy-Item -LiteralPath $asar -Destination (Join-Path $dest 'resources\app.asar') -Force
   foreach ($f in @('icon.ico', 'Uninstall.cmd', 'README.txt')) {
@@ -106,7 +129,7 @@ try {
     Where-Object { $_.Name -ne 'en-US.pak' -and $_.Name -ne 'en-GB.pak' } |
     Remove-Item -Force
   if (-not (Test-Path -LiteralPath (Join-Path $dest 'resources\app.asar'))) { throw 'Install incomplete: app.asar missing.' }
-  if (-not (Test-Path -LiteralPath $exe)) { throw 'Install incomplete: InkleafPDF.exe missing.' }
+  if (-not (Test-Path -LiteralPath $exe)) { throw 'Install incomplete: EaglesPDF.exe missing.' }
 
   # ---- 3. shortcuts + Open with ----------------------------------------
   Step '3' 'Creating Start menu and Desktop shortcuts...'
@@ -114,7 +137,7 @@ try {
     Get-ChildItem -LiteralPath $dest -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
     $shell = New-Object -ComObject WScript.Shell
     foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
-      $lnk = $shell.CreateShortcut((Join-Path $dir 'Inkleaf PDF.lnk'))
+      $lnk = $shell.CreateShortcut((Join-Path $dir 'Eagles PDF viewer.lnk'))
       $lnk.TargetPath = $exe
       $lnk.WorkingDirectory = $dest
       $lnk.IconLocation = "$icon,0"
@@ -124,18 +147,18 @@ try {
 
     $classes = 'HKCU:\Software\Classes'
     $openCmd = '"' + $exe + '" "%1"'
-    Set-RegValue "$classes\InkleafPDF.Document" '(Default)' 'PDF Document' 'String'
-    Set-RegValue "$classes\InkleafPDF.Document\DefaultIcon" '(Default)' ('"' + $icon + '",0') 'String'
-    Set-RegValue "$classes\InkleafPDF.Document\shell\open\command" '(Default)' $openCmd 'String'
-    Set-RegValue "$classes\.pdf\OpenWithProgids" 'InkleafPDF.Document' '' 'String'
-    Set-RegValue "$classes\Applications\InkleafPDF.exe\SupportedTypes" '.pdf' '' 'String'
-    Set-RegValue "$classes\Applications\InkleafPDF.exe\DefaultIcon" '(Default)' ('"' + $icon + '",0') 'String'
-    Set-RegValue "$classes\Applications\InkleafPDF.exe\shell\open\command" '(Default)' $openCmd 'String'
+    Set-RegValue "$classes\EaglesPDF.Document" '(Default)' 'PDF Document' 'String'
+    Set-RegValue "$classes\EaglesPDF.Document\DefaultIcon" '(Default)' ('"' + $icon + '",0') 'String'
+    Set-RegValue "$classes\EaglesPDF.Document\shell\open\command" '(Default)' $openCmd 'String'
+    Set-RegValue "$classes\.pdf\OpenWithProgids" 'EaglesPDF.Document' '' 'String'
+    Set-RegValue "$classes\Applications\EaglesPDF.exe\SupportedTypes" '.pdf' '' 'String'
+    Set-RegValue "$classes\Applications\EaglesPDF.exe\DefaultIcon" '(Default)' ('"' + $icon + '",0') 'String'
+    Set-RegValue "$classes\Applications\EaglesPDF.exe\shell\open\command" '(Default)' $openCmd 'String'
 
-    $uk = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\InkleafPDF'
-    Set-RegValue $uk 'DisplayName' 'Inkleaf PDF' 'String'
+    $uk = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\EaglesPDF'
+    Set-RegValue $uk 'DisplayName' 'Eagles PDF viewer' 'String'
     Set-RegValue $uk 'DisplayIcon' ('"' + $icon + '",0') 'String'
-    Set-RegValue $uk 'Publisher' 'Inkleaf' 'String'
+    Set-RegValue $uk 'Publisher' 'Eagles' 'String'
     Set-RegValue $uk 'DisplayVersion' $AppVersion 'String'
     Set-RegValue $uk 'InstallLocation' $dest 'String'
     Set-RegValue $uk 'UninstallString' ('"' + (Join-Path $dest 'Uninstall.cmd') + '"') 'String'
@@ -148,9 +171,9 @@ try {
   Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
 
   Write-Host ''
-  Write-Host 'Done! Inkleaf PDF is on your Start menu and Desktop.' -ForegroundColor Green
+  Write-Host 'Done! Eagles PDF viewer is on your Start menu and Desktop.' -ForegroundColor Green
   Write-Host 'Tip: to open PDFs with it by default, right-click any PDF > Open with >'
-  Write-Host '     Choose another app > Inkleaf PDF > Always.'
+  Write-Host '     Choose another app > Eagles PDF viewer > Always.'
   if ($onWindows) { Start-Process -FilePath $exe }
   Wait-IfStandalone
   exit 0

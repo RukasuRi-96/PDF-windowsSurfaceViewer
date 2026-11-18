@@ -1,8 +1,9 @@
-// Inkleaf PDF engine worker (MuPDF compiled to WebAssembly).
+// Eagles PDF viewer engine worker (MuPDF compiled to WebAssembly).
 // Several of these run in parallel: one "edit" worker owns annotations,
 // text and saving; the others only rasterize tiles.
 import * as mupdf from "./vendor/mupdf/mupdf.js";
 import { UNITS } from "./measure.js";
+import { strokeOutline } from "./inkgeom.js";
 
 const PDFAnnotation = mupdf.PDFAnnotation;
 // MuPDF notes when it re-embeds a font that has no character map of its own;
@@ -12,13 +13,13 @@ mupdf.setLog({
   warning: (m) => { if (!/cannot create ToUnicode mapping/.test(m)) console.warn("mupdf: " + m); },
 });
 const MANAGED_TYPES = new Set(["Ink", "Square", "Highlight", "Line", "PolyLine", "Polygon"]);
-// Line/PolyLine/Polygon are only managed when Inkleaf created them as
+// Line/PolyLine/Polygon are only managed when this app created them as
 // measurements (marked with this key); anyone else's are left to MuPDF.
 const MEASURE_TYPES = new Set(["Line", "PolyLine", "Polygon"]);
 const MEASURE_KEY = "InkleafMeasure";
 const MEASURE_INTENT = { Line: "LineDimension", PolyLine: "PolyLineDimension", Polygon: "PolygonDimension" };
 const MEASURE_SUBJECT = { Line: "Length Measurement", PolyLine: "Length Measurement", Polygon: "Area Measurement" };
-// Lines, arrows, clouds, text boxes, callouts and signatures Inkleaf created
+// Lines, arrows, clouds, text boxes, callouts and signatures this app created
 // carry this key (JSON { v, k: kind, ... }). They are drawn live from MuPDF's
 // own SVG of their appearance, so the screen matches the saved file exactly.
 // Anyone else's annotations of these types are left to MuPDF.
@@ -157,6 +158,25 @@ async function render({ page, res, bbox }) {
   }
 }
 
+// A page thumbnail, drawn straight from the page (no cached display list, so
+// thumbnails never push the page view's lists out of the cache).
+async function thumb({ page, res, bbox }) {
+  const p = entry(page).page;
+  const pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, false);
+  try {
+    pix.clear(255);
+    const dev = new mupdf.DrawDevice(mupdf.Matrix.identity, pix);
+    try { p.run(dev, mupdf.Matrix.scale(res, res)); } finally { dev.close(); dev.destroy(); }
+    const w = pix.getWidth(), h = pix.getHeight(), src = pix.getPixels();
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0, j = 0; i < src.length; i += 3, j += 4) { rgba[j] = src[i]; rgba[j + 1] = src[i + 1]; rgba[j + 2] = src[i + 2]; rgba[j + 3] = 255; }
+    const bitmap = await createImageBitmap(new ImageData(rgba, w, h));
+    return { result: { bitmap, w, h }, transfer: [bitmap] };
+  } finally {
+    pix.destroy();
+  }
+}
+
 function colorOf(c) {
   return Array.isArray(c) ? Array.from(c) : [];
 }
@@ -221,6 +241,8 @@ function annotData(a) {
   if (type === "Ink") {
     d.width = a.getBorderWidth();
     d.ink = a.getInkList().map((s) => s.map((p) => [p[0], p[1]]));
+    const w = inkWidths(a);
+    if (w && d.ink.length === 1 && w.length === d.ink[0].length) d.widths = w;
   } else if (type === "Square") {
     d.width = a.getBorderWidth();
     d.rect = Array.from(a.getRect());
@@ -269,6 +291,38 @@ function writeMeasure(a, data) {
   m.put("D", fmt(u.label, 1, den(u.dp)));
   m.put("A", fmt(u.area, Math.pow(u.m / (u.am || u.m), 2), den(u.adp)));
   obj.put("Measure", m);
+}
+
+// Pen strokes drawn with pressure: their widths (one per point) are kept in
+// this key, and the appearance is the stroke's filled outline, so it looks the
+// same in any PDF app.
+const INK_KEY = "InkleafInk";
+function inkWidths(a) {
+  try {
+    const v = a.getObject().get(INK_KEY);
+    if (!v || !v.isString()) return null;
+    const w = JSON.parse(v.asString()).w;
+    return Array.isArray(w) ? w : null;
+  } catch { return null; }
+}
+function writeInkAP(a, p, data) {
+  const pts = data.ink && data.ink[0], w = data.widths;
+  if (!pts || !Array.isArray(w) || data.ink.length !== 1 || w.length !== pts.length) return;
+  const m = mupdf.Matrix.invert(p.getTransform());
+  const P = strokeOutline(pts, w).map(([x, y]) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]);
+  const xs = P.map((q) => q[0]), ys = P.map((q) => q[1]);
+  const r = [Math.min(...xs) - 0.5, Math.min(...ys) - 0.5, Math.max(...xs) + 0.5, Math.max(...ys) + 0.5];
+  const f = (v) => String(Math.round(v * 1000) / 1000);
+  const arr = (vals) => { const o = doc.newArray(); for (const v of vals) o.push(doc.newReal(v)); return o; };
+  const c = Array.isArray(data.color) && data.color.length === 3 ? data.color : [0, 0, 0];
+  const ops = `${c.map(f).join(" ")} rg\n${f(P[0][0])} ${f(P[0][1])} m\n` + P.slice(1).map((q) => `${f(q[0])} ${f(q[1])} l`).join("\n") + "\nh f\n";
+  const obj = a.getObject();
+  obj.put("Rect", arr(r));
+  const ap = obj.get("AP").get("N");
+  ap.writeStream(ops);
+  ap.put("BBox", arr(r));
+  ap.put("Matrix", arr([1, 0, 0, 1, 0, 0]));
+  obj.put(INK_KEY, doc.newString(JSON.stringify({ v: 1, w })));
 }
 
 // Number of text lines MuPDF laid out (wrapped lines and blank lines each
@@ -386,7 +440,9 @@ function updateShape(p, id, data) {
   const info = data.shape ? Object.assign({ v: 1 }, shapeInfo(a) || {}, { k }) : null;
   setShapeProps(a, k, data, info || {});
   try { a.setModificationDate(new Date()); } catch {}
-  return finishShape(a, k, data, info);
+  const out = finishShape(a, k, data, info);
+  if (k === "ink" && data.widths) { writeInkAP(a, p, data); out.bounds = Array.from(a.getBounds()); }
+  return out;
 }
 
 // ---- edited lines of page text ("retext") --------------------------------
@@ -775,9 +831,110 @@ function openFrom(bytes, password) {
 let fileBytes = null;
 let docPassword = null;
 
+// ---- pages: delete, add, copy in, move, rotate; merging files --------------
+// Each change is made to the open document, which is then rewritten in
+// memory (dropping removed pages' content) and reopened; the renderers reopen
+// the same bytes. The state before the change comes back for undo.
+async function loadSource(url, password) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Cannot read file (${r.status})`);
+  const src = mupdf.Document.openDocument(new Uint8Array(await r.arrayBuffer()), "application/pdf");
+  if (src.needsPassword() && !(password && src.authenticatePassword(password))) {
+    src.destroy();
+    const e = new Error("This PDF is password protected");
+    e.code = "password";
+    throw e;
+  }
+  return src;
+}
+
+function snapshot(opts) {
+  const b = doc.saveToBuffer(opts || "");
+  const u = b.asUint8Array().slice();
+  b.destroy();
+  return u;
+}
+
+function reloadFrom(bytes) {
+  fileBytes = { url: fileBytes?.url, data: bytes };
+  const r = openFrom(bytes, docPassword);
+  if (r.needsPassword) throw new Error("Couldn't reopen the document");
+  return r;
+}
+
+function graftPages(src, list, at) {
+  const map = doc.newGraftMap(); // shared fonts and images are copied once
+  list.forEach((sp, k) => map.graftPage(at + k, src, sp));
+}
+
+async function pageOp(op) {
+  const n = doc.countPages();
+  const valid = (i) => Number.isInteger(i) && i >= 0 && i < n;
+  switch (op.kind) {
+    case "delete": {
+      const list = [...new Set(op.pages)].filter(valid).sort((a, b) => b - a);
+      if (!list.length) throw new Error("No pages to delete");
+      if (list.length >= n) throw new Error("A PDF needs at least one page");
+      for (const i of list) doc.deletePage(i);
+      break;
+    }
+    case "blank": {
+      const at = Math.max(0, Math.min(n, op.at));
+      for (let k = 0; k < Math.max(1, Math.min(100, op.count || 1)); k++) doc.insertPage(at + k, doc.addPage([0, 0, op.w, op.h], 0, null, ""));
+      break;
+    }
+    case "insert": {
+      const src = await loadSource(op.url, op.password);
+      try {
+        const m = src.countPages();
+        const list = (op.pages && op.pages.length ? op.pages : [...Array(m).keys()]).filter((i) => i >= 0 && i < m);
+        graftPages(src, list, Math.max(0, Math.min(n, op.at)));
+      } finally { src.destroy(); }
+      break;
+    }
+    case "duplicate": {
+      const list = op.pages.filter(valid).sort((a, b) => a - b);
+      const src = mupdf.Document.openDocument(snapshot(""), "application/pdf");
+      try {
+        if (src.needsPassword()) src.authenticatePassword(docPassword || "");
+        graftPages(src, list, Math.max(0, Math.min(n, op.at)));
+      } finally { src.destroy(); }
+      break;
+    }
+    case "move": {
+      // op.order: the old index of each page, in the new order.
+      if (op.order.length !== n || new Set(op.order).size !== n || !op.order.every(valid)) throw new Error("Bad page order");
+      doc.rearrangePages(op.order);
+      break;
+    }
+    case "rotate": {
+      for (const i of op.pages.filter(valid)) {
+        const pobj = doc.findPage(i);
+        const r = pobj.getInheritable("Rotate");
+        const cur = r.isNumber() ? r.asNumber() : 0;
+        pobj.put("Rotate", doc.newInteger((((cur + op.by) % 360) + 360) % 360));
+      }
+      break;
+    }
+    default:
+      throw new Error("Unknown page change " + op.kind);
+  }
+}
+
+function structureResult(before) {
+  const after = snapshot("garbage=yes,compress=yes");
+  const r = reloadFrom(after);
+  const forRenderers = after.slice();
+  const result = { bytes: forRenderers, bounds: r.bounds, pageCount: r.pageCount };
+  const transfer = [forRenderers.buffer, r.bounds.buffer];
+  if (before) { result.before = before; transfer.push(before.buffer); }
+  return { result, transfer };
+}
+
 const handlers = {
-  async open({ url, password }) {
-    if (!fileBytes || fileBytes.url !== url) {
+  async open({ url, password, bytes }) {
+    if (bytes) fileBytes = { url: null, data: bytes }; // reopened after a page change
+    else if (!fileBytes || fileBytes.url !== url) {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Cannot read file (${res.status})`);
       fileBytes = { url, data: new Uint8Array(await res.arrayBuffer()) };
@@ -796,7 +953,50 @@ const handlers = {
     return { result: true };
   },
   setAuthor({ name }) { author = name || ""; return { result: true }; },
+  // Change pages (see pageOp); returns the new bytes and page sizes, and the
+  // document as it was before, for undo.
+  async pages({ op }) {
+    const before = snapshot("");
+    await pageOp(op);
+    return structureResult(before);
+  },
+  // Undo/redo of a page change: go back to a saved state, returning the
+  // current one.
+  restore({ bytes }) {
+    const before = snapshot("");
+    reloadFrom(bytes);
+    return structureResult(before);
+  },
+  // Number of pages in another PDF (to choose pages to copy from it).
+  async countPagesOf({ url, password }) {
+    const src = await loadSource(url, password);
+    try { return { result: src.countPages() }; } finally { src.destroy(); }
+  },
+  // A new PDF with every page of each file, in order.
+  async merge({ files }) {
+    const out = new mupdf.PDFDocument();
+    const failed = [];
+    try {
+      for (const f of files) {
+        let src;
+        try { src = await loadSource(f.url); } catch (e) { failed.push({ name: f.name, why: e.code === "password" ? "password protected" : e.message }); continue; }
+        try {
+          const map = out.newGraftMap();
+          const m = src.countPages();
+          for (let i = 0; i < m; i++) map.graftPage(out.countPages(), src, i);
+        } catch (e) {
+          failed.push({ name: f.name, why: e.message });
+        } finally { src.destroy(); }
+      }
+      if (!out.countPages()) throw new Error("None of the files could be read" + (failed.length ? ` (${failed.map((x) => x.name + ": " + x.why).join("; ")})` : ""));
+      const b = out.saveToBuffer("garbage=yes,compress=yes");
+      const bytes = b.asUint8Array().slice();
+      b.destroy();
+      return { result: { bytes, failed, pages: out.countPages() }, transfer: [bytes.buffer] };
+    } finally { out.destroy(); }
+  },
   render,
+  thumb,
   pageAnnots({ page }) {
     const e = entry(page);
     const out = [];
@@ -835,6 +1035,7 @@ const handlers = {
       writeMeasure(a, data);
     }
     a.update();
+    if (data.type === "Ink" && data.widths) writeInkAP(a, p, data);
     return { result: a.getObject().asIndirect() };
   },
   async updateAnnot({ page, id, data }) {

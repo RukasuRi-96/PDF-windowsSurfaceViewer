@@ -35,4 +35,4 @@ http.createServer(async (req, res) => {
   } catch (err) {
     send(404, String(err.message), "text/plain");
   }
-}).listen(port, () => console.log(`Inkleaf dev server on http://localhost:${port}`));
+}).listen(port, () => console.log(`Eagles PDF viewer dev server on http://localhost:${port}`));

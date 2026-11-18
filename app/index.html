@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'">
-<title>Inkleaf PDF</title>
+<title>Eagles PDF viewer</title>
+<link rel="icon" href="logo.png">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,7 +13,7 @@
   <header id="toolbar">
     <div class="tb-group tb-left">
       <button class="btn icon-btn" id="btn-sidebar" title="Show/hide files (Ctrl+B)"></button>
-      <div id="title"><span id="title-text">Inkleaf PDF</span><span id="dirty-dot" title="Unsaved changes"></span></div>
+      <div id="title"><span id="title-text">Eagles PDF viewer</span><span id="dirty-dot" title="Unsaved changes"></span></div>
     </div>
     <div class="tb-group tb-tools" role="toolbar" aria-label="Tools">
       <div class="seg" id="tools">
@@ -51,8 +52,8 @@
       <div id="viewer"></div>
       <div id="empty">
         <div class="empty-card">
-          <div class="logo"></div>
-          <h1>Inkleaf PDF</h1>
+          <img class="logo" src="logo.png" alt="" width="96" height="96">
+          <h1>Eagles PDF viewer</h1>
           <p id="empty-msg">Open a folder to see every PDF inside it, including subfolders.</p>
           <button class="btn primary" id="empty-open"></button>
           <ul class="tips">

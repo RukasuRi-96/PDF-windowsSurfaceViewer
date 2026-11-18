@@ -1,7 +1,8 @@
-// Inkleaf viewer: continuous page layout, compositor-driven pan/zoom,
+// Eagles PDF viewer: page view: continuous page layout, compositor-driven pan/zoom,
 // tiled rendering, touch + pen gestures, and live vector annotations.
 
 import { measureText, MODE_TYPES, DEFAULT_SCALE, pathLength, polyCentroid, sameScale } from "./measure.js";
+import { pressureWidth, strokeOutline, polyPath } from "./inkgeom.js";
 
 const SVGNS = "http://www.w3.org/2000/svg";
 const TILE = 512;              // device pixels per tile edge
@@ -90,10 +91,40 @@ function smooth(pts) {
   return out;
 }
 
+// The stroke exactly as drawn live: a quadratic curve through the midpoints
+// of the pen's samples, flattened into short straight pieces (PDF ink is a
+// polyline) at most `step` long. Small loops keep their shape.
+function curveStroke(pts, step) {
+  if (pts.length < 3) return pts.slice();
+  const out = [pts[0]];
+  let from = pts[0];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const c = pts[i], to = c.map((v, j) => (v + pts[i + 1][j]) / 2);
+    const len = Math.hypot(c[0] - from[0], c[1] - from[1]) + Math.hypot(to[0] - c[0], to[1] - c[1]);
+    const n = Math.max(1, Math.min(16, Math.ceil(len / step)));
+    for (let k = 1; k <= n; k++) {
+      const t = k / n, u = 1 - t;
+      out.push(c.map((_, j) => u * u * from[j] + 2 * u * t * c[j] + t * t * to[j]));
+    }
+    from = to;
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+// Cursor for a pen hovering over the page: a dot the size and colour of the ink.
+function dotCursor(color, px) {
+  const d = Math.round(Math.max(4, Math.min(26, px))), r = d / 2, s = d + 4, c = s / 2;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}"><circle cx="${c}" cy="${c}" r="${r + 1}" fill="white" fill-opacity="0.85"/><circle cx="${c}" cy="${c}" r="${r}" fill="${color}"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, crosshair`;
+}
+
 // Tools a finger uses when "finger draws" is on (otherwise a finger pans).
 const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure", "content"]);
 const FONT_CSS = { Helv: "Helvetica, Arial, sans-serif", TiRo: '"Times New Roman", Times, serif', Cour: '"Courier New", Courier, monospace' };
 const round2 = (v) => Math.round(v * 100) / 100;
+// A pen stroke with a width per point (drawn with pressure).
+const inkWidths = (d) => d.widths && d.ink && d.ink.length === 1 && d.widths.length === d.ink[0].length;
 
 // CSS font for typing over a line of the page (the real font is used once
 // the edit is made): the installed family, else the PDF's font name.
@@ -118,7 +149,8 @@ export class Viewer {
     root.classList.add("viewer");
     this.world = el("div", "world", root);
     this.live = el("canvas", "live", root);
-    this.liveCtx = this.live.getContext("2d");
+    // Low-latency canvas for live ink: drawn strokes skip the compositor.
+    this.liveCtx = this.live.getContext("2d", { desynchronized: true }) || this.live.getContext("2d");
     this.vbar = el("div", "scrollbar v", root);
     this.vthumb = el("div", "thumb", this.vbar);
     this.hbar = el("div", "scrollbar h", root);
@@ -181,6 +213,14 @@ export class Viewer {
 
     root.addEventListener("pointerdown", (e) => this._down(e));
     root.addEventListener("pointermove", (e) => this._move(e));
+    // Pen samples as soon as they arrive (not once per frame) while writing.
+    if ("onpointerrawupdate" in window) {
+      root.addEventListener("pointerrawupdate", (e) => {
+        const a = this.action;
+        if (a && a.kind === "ink" && a.pid === e.pointerId) { a.raw = true; this._moveInk(a, e); }
+      });
+    }
+    root.addEventListener("pointerleave", () => root.classList.remove("pen-near"));
     root.addEventListener("pointerup", (e) => this._up(e, false));
     root.addEventListener("pointercancel", (e) => this._up(e, true));
     root.addEventListener("lostpointercapture", (e) => { if (this.pointers.has(e.pointerId)) this._up(e, true); });
@@ -540,6 +580,7 @@ export class Viewer {
     this._positionAll();
     this._update();
     this.cb.onZoom?.(this.scale, this.zoomMode);
+    this._penCursor();
   }
 
   zoomBy(f, px = this.vw / 2, py = this.vh / 2) {
@@ -582,6 +623,7 @@ export class Viewer {
     this._positionAll();
     this._update();
     this.cb.onZoom?.(this.scale, this.zoomMode);
+    this._penCursor();
   }
 
   _wheel(e) {
@@ -895,6 +937,16 @@ export class Viewer {
 
   setStyle(tool, style) {
     Object.assign(this.styles[tool], style);
+    if (tool === "pen") this._penCursor();
+  }
+
+  _penCursor() {
+    const st = this.styles.pen;
+    if (!st || !st.color) return;
+    const key = cssColor(st.color) + "|" + Math.round(st.width * this.scale);
+    if (key === this._penCursorKey) return;
+    this._penCursorKey = key;
+    this.root.style.setProperty("--pen-cursor", dotCursor(cssColor(st.color), st.width * this.scale));
   }
 
   setShape(shape) {
@@ -977,6 +1029,9 @@ export class Viewer {
 
   _move(e) {
     if (e.pointerType === "pen") this.lastPen = now();
+    // A hovering pen shows a dot (ink colour and size) instead of a crosshair.
+    const pen = e.pointerType === "pen";
+    if (pen !== this._penNear) { this._penNear = pen; this.root.classList.toggle("pen-near", pen); }
     const ptr = this.pointers.get(e.pointerId);
     if (!ptr) { this._hover(e); return; }
     if (ptr.ignored) return;
@@ -988,7 +1043,7 @@ export class Viewer {
     if (a.pid !== e.pointerId) return;
     switch (a.kind) {
       case "pan": this._movePan(a, ptr); break;
-      case "ink": this._moveInk(a, e); break;
+      case "ink": if (!a.raw) this._moveInk(a, e); break;
       case "highlight": this._moveHighlight(a, e); break;
       case "box": this._moveBox(a, e); break;
       case "erase": this._moveErase(a, e); break;
@@ -1208,13 +1263,16 @@ export class Viewer {
 
   _startInk(base, p, e) {
     const st = this.styles.pen;
-    const a = (this.action = { ...base, kind: "ink", pts: [p], color: st.color.slice(), width: st.width, opacity: 1 });
+    // With the pen, the stroke's width follows its pressure (unless turned off).
+    const pressure = st.pressure !== false && e.pointerType === "pen";
+    const pr0 = pressure ? (e.pressure || 0.5) : 0.5;
+    const a = (this.action = { ...base, kind: "ink", pts: [p], pr: [pr0], prS: pr0, pressure, color: st.color.slice(), width: st.width, opacity: 1 });
     const c = this.liveCtx;
     c.save();
     this._liveClipToPage(a.page);
     c.strokeStyle = cssColor(a.color);
     c.fillStyle = cssColor(a.color);
-    c.lineWidth = Math.max(0.5, a.width * this.scale);
+    c.lineWidth = Math.max(0.5, (a.pressure ? pressureWidth(a.width, pr0) : a.width) * this.scale);
     c.lineCap = "round";
     c.lineJoin = "round";
     const [sx, sy] = this._screenOf(a.page, p);
@@ -1231,8 +1289,13 @@ export class Viewer {
     for (const ev of evs.length ? evs : [e]) {
       const p = this._clampToPage(a.page, this._clientToPage(a.page, ev.clientX, ev.clientY));
       const lp = a.pts[a.pts.length - 1];
-      if (Math.hypot(p[0] - lp[0], p[1] - lp[1]) * this.scale < 0.6) continue;
+      if (Math.hypot(p[0] - lp[0], p[1] - lp[1]) * this.scale < 0.4) continue;
       a.pts.push(p);
+      if (a.pressure) {
+        a.prS += ((ev.pressure || a.prS) - a.prS) * 0.35; // steady out sensor noise
+        c.lineWidth = Math.max(0.5, pressureWidth(a.width, a.prS) * this.scale);
+      }
+      a.pr.push(a.prS);
       const s = this._screenOf(a.page, p);
       const mid = [(a.last[0] + s[0]) / 2, (a.last[1] + s[1]) / 2];
       c.beginPath();
@@ -1257,8 +1320,18 @@ export class Viewer {
     if (cancel) { this._clearLive(); return; }
     let pts = a.pts;
     if (pts.length === 1) pts = [pts[0], [pts[0][0] + 0.01, pts[0][1]]];
-    pts = simplify(smooth(pts), 0.18 / this.scale).map(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]);
-    this._commitAdd(a.page, { type: "Ink", color: a.color, opacity: a.opacity, width: a.width, ink: [pts] });
+    // Keep the stroke as written (no averaging, which shrinks small loops),
+    // as the same smooth curve that was drawn live.
+    if (a.pressure) {
+      const pw = a.pts.length === 1 ? [a.pr[0], a.pr[0]] : a.pr;
+      const curve = curveStroke(pts.map((q, k) => [q[0], q[1], pressureWidth(a.width, pw[k])]), 2 / this.scale);
+      const ink = curve.map((q) => [round2(q[0]), round2(q[1])]);
+      const widths = curve.map((q) => Math.round(q[2] * 1000) / 1000);
+      this._commitAdd(a.page, { type: "Ink", color: a.color, opacity: a.opacity, width: a.width, ink: [ink], widths });
+    } else {
+      pts = simplify(curveStroke(pts, 1.5 / this.scale), 0.12 / this.scale).map(([x, y]) => [round2(x), round2(y)]);
+      this._commitAdd(a.page, { type: "Ink", color: a.color, opacity: a.opacity, width: a.width, ink: [pts] });
+    }
     this._clearLive();
   }
 
@@ -1669,7 +1742,7 @@ export class Viewer {
 
   _snap(d) {
     const g = {};
-    for (const k of ["pts", "rect", "ink", "text", "size", "font", "color", "fill", "width", "callout", "origin", "erase", "face"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
+    for (const k of ["pts", "rect", "ink", "widths", "text", "size", "font", "color", "fill", "width", "callout", "origin", "erase", "face"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
     return g;
   }
 
@@ -1755,6 +1828,7 @@ export class Viewer {
     const d = S.d, k = this._kindOf(d), g = this._snap(d), isText = k === "text" || k === "callout";
     if (style.color) g.color = style.color.slice();
     if (style.width != null && k !== "text") g.width = k === "callout" ? Math.min(2, style.width) : style.width;
+    if (k === "ink" && g.widths && style.width != null && d.width) g.widths = g.widths.map((w) => Math.round((w * style.width / d.width) * 1000) / 1000);
     if (isText && style.size) g.size = style.size;
     if (isText && style.fill != null) g.fill = style.fill ? [1, 1, 1] : [];
     if (k === "callout" && g.callout) g.callout = this._calloutPts(g.callout[0], g.rect, g.width || 0, g.size);
@@ -1879,6 +1953,7 @@ export class Viewer {
   // Stand-in drawing of a markup at a new place while it's dragged.
   _previewNode(tmp, kind) {
     if (tmp.shape) return this._shapeNode(tmp);
+    if (kind === "ink" && inkWidths(tmp)) return svgEl("path", { d: polyPath(strokeOutline(tmp.ink[0], tmp.widths)), fill: cssColor(tmp.color) });
     if (kind === "ink") {
       return svgEl("path", { d: tmp.ink.map((st) => "M" + st.map((p) => p.join(" ")).join("L")).join(""), fill: "none", stroke: cssColor(tmp.color), "stroke-width": tmp.width || 1, "stroke-linecap": "round", "stroke-linejoin": "round", opacity: tmp.opacity < 1 ? tmp.opacity : 1 });
     }
@@ -2755,6 +2830,10 @@ export class Viewer {
     } else if (d.shape) {
       node = this._shapeNode(d);
       s.svgInk.insertBefore(node, s.prevInk);
+    } else if (d.type === "Ink" && inkWidths(d)) {
+      node = svgEl("path", { d: polyPath(strokeOutline(d.ink[0], d.widths)), fill: cssColor(d.color) });
+      if (d.opacity < 1) node.setAttribute("opacity", d.opacity);
+      s.svgInk.insertBefore(node, s.prevInk);
     } else if (d.type === "Ink") {
       const path = d.ink.map((st) => "M" + st.map((p) => p[0] + " " + p[1]).join("L")).join("");
       node = svgEl("path", { d: path, fill: "none", stroke: cssColor(d.color), "stroke-width": d.width || 1, "stroke-linecap": "round", "stroke-linejoin": "round" });
@@ -2858,6 +2937,7 @@ export class Viewer {
     }
     const o = { type: d.type, color: d.color, opacity: d.opacity, width: d.width };
     if (d.ink) o.ink = d.ink;
+    if (inkWidths(d)) o.widths = d.widths;
     if (d.rect) o.rect = d.rect;
     if (d.fill) o.fill = d.fill;
     if (d.quads) o.quads = d.quads;
@@ -2901,7 +2981,18 @@ export class Viewer {
     doc.undo.push({ seq: ++doc.seq, ops });
     doc.redo.length = 0;
     this._history();
+    this.cb.onEdit?.();
   }
+
+  // The pages changed (added, removed, moved...): unsaved until saved.
+  markChanged() {
+    if (!this.doc) return;
+    this.doc.savedSeq = -1;
+    this._history();
+  }
+
+  get canUndo() { return !!(this.doc && (this.doc.undo.length || this.editor || this.placing)); }
+  get canRedo() { return !!(this.doc && this.doc.redo.length); }
 
   _apply(ops, inverse) {
     const list = inverse ? ops.slice().reverse() : ops;

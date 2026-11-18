@@ -1,23 +1,24 @@
-INKLEAF PDF  -  fast touch & pen PDF reader for Windows
-=====================================================
+EAGLES PDF VIEWER  -  fast touch & pen PDF reader for Windows
+=============================================================
 
 INSTALL
-  1. Right-click InkleafPDF-Setup.zip > "Extract All..." > Extract.
-  2. In the folder that opens, double-click  Install Inkleaf PDF
-     (its full name is "Install Inkleaf PDF.cmd"; Windows usually hides
+  1. Right-click EaglesPDF-Setup.zip > "Extract All..." > Extract.
+  2. In the folder that opens, double-click  Install Eagles PDF viewer
+     (its full name is "Install Eagles PDF viewer.cmd"; Windows usually hides
       the ".cmd" ending). Leave the "files" folder next to it.
      If Windows says "Windows protected your PC", click "More info"
      > "Run anyway". The app isn't code-signed.
   3. Setup downloads the app runtime (about 160 MB) straight from
      Electron's official GitHub releases, checks its SHA-256 fingerprint,
-     and installs everything to  %LOCALAPPDATA%\Programs\Inkleaf PDF.
-     It takes a minute or two, then Inkleaf PDF opens by itself and is
+     and installs everything to  %LOCALAPPDATA%\Programs\Eagles PDF viewer.
+     It takes a minute or two, then Eagles PDF viewer opens by itself and is
      on your Start menu and Desktop. No admin rights are needed.
 
-  To update later, run the new "Install Inkleaf PDF" the same way.
-  Your settings and your PDFs are kept.
+  To update later, run the new "Install Eagles PDF viewer" the same way.
+  Your settings and your PDFs are kept. If you had "Inkleaf PDF" (this
+  app's earlier name), setup replaces it and keeps its settings.
 
-  If "Install Inkleaf PDF" is missing (some antivirus or company
+  If "Install Eagles PDF viewer" is missing (some antivirus or company
   policies remove .cmd files), open the "files" folder, right-click
   "setup" (setup.ps1) and choose "Run with PowerShell".
 
@@ -84,7 +85,7 @@ EDIT THE PAGE'S CONTENT (X)
   Tap a line of text to retype it, then press Enter. It keeps the
   line's font, size, bold/italic, colour and position. Tap it again to
   change it again, before or after saving.
-  Everything is applied when you save (Inkleaf asks first for erase
+  Everything is applied when you save (the app asks first for erase
   areas): what is under them is removed from the PDF for good. Use
   Save as to keep the original.
 
@@ -108,7 +109,7 @@ OTHER KEYS
   F11 full screen
 
 UNINSTALL
-  Settings > Apps > Installed apps > Inkleaf PDF > Uninstall.
+  Settings > Apps > Installed apps > Eagles PDF viewer > Uninstall.
 
 Third-party: MuPDF (AGPL-3.0, Artifex), Electron/Chromium (MIT/BSD),
 Lucide icons (ISC). See the 'licenses' folder and LICENSES.chromium.html.

@@ -1,10 +1,16 @@
-# Inkleaf PDF
+<p align="center"><img src="electron/icon.png" width="140" alt="Eagles PDF viewer"></p>
+
+# Eagles PDF viewer
 
 A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
 
-![Inkleaf PDF measuring a services layout drawing at 1:100](docs/screenshot.jpg)
+### ⬇ [Download Eagles PDF viewer for Windows (EaglesPDF-Setup.zip, 5 MB)](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)
 
-**Current version: 1.4.1** · Windows 10 or 11, 64-bit
+Then extract the zip and double-click **Install Eagles PDF viewer** ([step by step](#install)). Everything comes from GitHub: this repository holds the app, and setup fetches the Electron runtime from Electron's official GitHub releases and checks its fingerprint.
+
+![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
+
+**Current version: 1.5.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -16,34 +22,34 @@ A fast PDF reader and markup app for Windows tablets like the Surface Pro, for t
 
 You need Windows 10 or 11 on a 64-bit Intel or AMD PC, such as a Surface Pro 9 with an Intel Core i5 or i7. You also need an internet connection while setup runs, and you don't need administrator rights.
 
-1. Download **`InkleafPDF-Setup.zip`** (about 5 MB) from the [`downloads` folder](downloads/InkleafPDF-Setup.zip): open it and click the **Download raw file** button (↓) at the top right. Don't use the green **Code → Download ZIP** button; that gives you the source code, not the installer.
+1. Download **[`EaglesPDF-Setup.zip`](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)** (about 5 MB). The link downloads it straight away. You can also find it in the [`downloads` folder](downloads/EaglesPDF-Setup.zip) (click the **Download raw file** button ↓ there). Don't use the green **Code → Download ZIP** button; that gives you the source code, not the installer.
 2. Right-click the zip and choose **Extract All…**, then **Extract**. Setup doesn't work from inside the zip.
-3. The extracted folder holds **Install Inkleaf PDF**, **README** and a **files** folder. Double-click **Install Inkleaf PDF**.
-   - Its full name is `Install Inkleaf PDF.cmd`, but Windows usually hides the `.cmd` ending.
+3. The extracted folder holds **Install Eagles PDF viewer**, **README** and a **files** folder. Double-click **Install Eagles PDF viewer**.
+   - Its full name is `Install Eagles PDF viewer.cmd`, but Windows usually hides the `.cmd` ending.
    - If Windows shows *"Windows protected your PC"*, click **More info**, then **Run anyway**. This appears because the app isn't code-signed.
-   - If **Install Inkleaf PDF** is missing (some antivirus or company policies remove `.cmd` files), open the **files** folder, right-click **setup** (`setup.ps1`) and choose **Run with PowerShell**.
+   - If **Install Eagles PDF viewer** is missing (some antivirus or company policies remove `.cmd` files), open the **files** folder, right-click **setup** (`setup.ps1`) and choose **Run with PowerShell**.
 4. A setup window opens and does three things:
    - it downloads the app's runtime (about 160 MB) from Electron's official GitHub releases;
    - it checks the download's SHA-256 fingerprint;
-   - it installs everything to `%LOCALAPPDATA%\Programs\Inkleaf PDF`.
+   - it installs everything to `%LOCALAPPDATA%\Programs\Eagles PDF viewer`.
 
-   This takes a minute or two. Inkleaf PDF then opens by itself, and it's on your **Start menu** and **Desktop**.
+   This takes a minute or two. Eagles PDF viewer then opens by itself, and it's on your **Start menu** and **Desktop**.
 
 ### Make it your default PDF app (optional)
 
-Right-click any PDF in File Explorer and choose **Open with**, then **Choose another app**, then **Inkleaf PDF**, then **Always**.
+Right-click any PDF in File Explorer and choose **Open with**, then **Choose another app**, then **Eagles PDF viewer**, then **Always**.
 
 ### Update
 
-Download the new `InkleafPDF-Setup.zip` and run its **Install Inkleaf PDF** the same way. Your settings, drawing scales and last-opened file are kept.
+Download the new `EaglesPDF-Setup.zip` and run its **Install Eagles PDF viewer** the same way. Your settings, drawing scales and last-opened file are kept.
 
 ### Uninstall
 
-Go to **Settings**, then **Apps**, then **Installed apps**. Click **⋯** next to **Inkleaf PDF** and choose **Uninstall**. Your PDFs are not touched.
+Go to **Settings**, then **Apps**, then **Installed apps**. Click **⋯** next to **Eagles PDF viewer** and choose **Uninstall**. Your PDFs are not touched.
 
 ### Other ways to install
 
-- **No internet during setup, or GitHub is blocked on your network:** use **`InkleafPDF-win-x64.zip`** (about 150 MB) from the same release. It already contains the runtime. Extract it and double-click **`Install.cmd`**.
+- **No internet during setup, or GitHub is blocked on your network:** use the complete package **`EaglesPDF-win-x64.zip`** (about 150 MB) from the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases) once it has been published there (see [Publish a version](#publish-a-version)), or build it yourself (see [Build the Windows app](#build-the-windows-app)). It already contains the runtime. Extract it and double-click **`Install.cmd`**.
 - **Surface Pro 9 with 5G (Microsoft SQ3, ARM):** the x64 version runs through Windows 11's built-in emulation. For full speed, build the ARM version (`node tools/build-win.js arm64`, see [Build the Windows app](#build-the-windows-app)) and install it with `Install.cmd`.
 
 ## Getting started
@@ -55,10 +61,10 @@ Go to **Settings**, then **Apps**, then **Installed apps**. Click **⋯** next t
   - The list updates by itself when files are added or removed.
 - Type in **Filter PDFs** (**Ctrl+F**) to find a file by name.
 - Click or tap a file to open it. **Alt+↓** and **Alt+↑** move to the next and previous PDF in the list.
-- You can also drag a PDF or a folder onto the window, use **⋯ → Open file…**, or open PDFs from File Explorer once Inkleaf is your default app.
+- You can also drag a PDF or a folder onto the window, use **⋯ → Open file…**, or open PDFs from File Explorer once it's your default app.
 - Right-click a file in the list for **Show in folder** and **Copy path**.
 - Drag the list's edge to resize it, or hide it with the button at the top left (**Ctrl+B**).
-- Inkleaf remembers where you were in each file and reopens the last one when it starts.
+- The app remembers where you were in each file and reopens the last one when it starts.
 
 ### 2. Move around
 
@@ -92,6 +98,7 @@ The toolbar in the middle holds the tools:
 
 - **Colors and thickness:** tap the active tool again, or tap the colored dot next to the tools.
 - **Pen and finger:** the pen uses the selected tool, and a finger always pans and zooms. To draw with a finger, turn on the **finger button** (**T**); you then pan and zoom with two fingers.
+- **Writing with the pen:** strokes get thinner or thicker with pen pressure, like ink (turn this off in the Pen tool's colour menu). While the pen hovers, a dot in the ink's colour and size shows where it will write. Ink appears with very little delay and keeps the exact shape you wrote.
 - **Erasing with the pen:** flip the Surface Pen over and use its eraser end, or hold its side button.
 - **Palm rejection:** your palm is ignored while the pen is near the screen.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the arrows in the toolbar.
@@ -156,12 +163,12 @@ The **Edit content** tool (**X**) changes the page itself, not just the markups 
 
 Everything is applied when you **save**:
 - Edited lines become real text in the PDF: searchable, copyable, and editable again later.
-- For erase areas Inkleaf asks first, because what's under them is removed from the PDF for good: it can't be copied, searched or recovered from the saved file.
+- For erase areas the app asks first, because what's under them is removed from the PDF for good: it can't be copied, searched or recovered from the saved file.
 - To keep the original, use **Save as** (**Ctrl+Shift+S**) for the edited version.
 
 How the font is matched:
 1. If every letter you type already appears in that font on the page, the document's own embedded font is used, so the result is identical.
-2. Otherwise Inkleaf uses the same font installed on your PC (Calibri, Arial, Times New Roman and so on). Only the letters used are embedded, so the file stays small.
+2. Otherwise the app uses the same font installed on your PC (Calibri, Arial, Times New Roman and so on). Only the letters used are embedded, so the file stays small.
 3. If that font isn't installed either, it uses the closest standard font (Helvetica, Times or Courier, in bold or italic as needed).
 
 > Each line is edited on its own. Longer new text doesn't push the rest of the paragraph along, so for big rewrites erase the paragraph and add a text box instead. Rotated or vertical text can't be retyped, but you can erase it.
@@ -199,7 +206,7 @@ Click on blank paper or press **Esc** to clear the selection.
    - **Backspace** removes the last point, and **Esc** cancels.
    - **With a finger:** tap to place points, and drag to pan as usual.
 
-Each measurement is saved into the PDF as a standard PDF measurement markup, with its value in the markup's note, so other PDF apps can show it. You can erase measurements and undo them like any other markup. If you change the scale after measuring, Inkleaf offers to recalculate the existing measurements, and one Ctrl+Z puts them back.
+Each measurement is saved into the PDF as a standard PDF measurement markup, with its value in the markup's note, so other PDF apps can show it. You can erase measurements and undo them like any other markup. If you change the scale after measuring, the app offers to recalculate the existing measurements, and one Ctrl+Z puts them back.
 
 > A measurement is only as accurate as the scale. For drawings marked *NTS* (not to scale), or ones that may have been printed or scanned at a different size, calibrate against a known dimension first.
 
@@ -207,10 +214,10 @@ Each measurement is saved into the PDF as a standard PDF measurement markup, wit
 
 - **Ctrl+S** (or the save button) writes your markups into the PDF as standard annotations. Acrobat, Edge, Bluebeam and other PDF apps show them too, and they stay movable and editable.
 - **Ctrl+Shift+S** saves a copy under a new name.
-- A blue dot next to the file name means there are unsaved changes. Inkleaf asks before you close or switch files with unsaved changes.
-- If another program changed the file after you opened it, Inkleaf asks before overwriting those changes.
+- A blue dot next to the file name means there are unsaved changes. The app asks before you close or switch files with unsaved changes.
+- If another program changed the file after you opened it, the app asks before overwriting those changes.
 
-**Embed markups** (**⋯ → Embed markups…**) makes highlights, drawings, shapes, text, callouts and signatures part of the pages. After that they can't be moved, edited or deleted, in Inkleaf or any other PDF app. Use it when you send out a final, signed or marked-up copy. Erase areas are applied at the same time, and form fields stay fillable. You choose:
+**Embed markups** (**⋯ → Embed markups…**) makes highlights, drawings, shapes, text, callouts and signatures part of the pages. After that they can't be moved, edited or deleted, in this app or any other PDF app. Use it when you send out a final, signed or marked-up copy. Erase areas are applied at the same time, and form fields stay fillable. You choose:
 
 - **Save as a copy…** (suggested name: *name (embedded).pdf*). The file you have open keeps its editable markups.
 - **Replace this file.** The open file is rewritten with everything embedded. This can't be undone.
@@ -261,8 +268,8 @@ These keys always do the same thing in their situation:
 | Problem | What to do |
 |---|---|
 | *"Windows protected your PC"* when running Setup | Click **More info**, then **Run anyway**. The app isn't code-signed. |
-| Can't find **Install Inkleaf PDF** after extracting | Make sure you extracted `InkleafPDF-Setup.zip` (the installer), not the repository's source-code zip. If it's still missing, use **files → setup → Run with PowerShell** as described in [Install](#install). |
-| Setup says it couldn't download, or the safety check failed | Check your internet connection and run **Install Inkleaf PDF** again. If your network blocks github.com, use `InkleafPDF-win-x64.zip` and `Install.cmd` instead (see [Other ways to install](#other-ways-to-install)). |
+| Can't find **Install Eagles PDF viewer** after extracting | Make sure you extracted `EaglesPDF-Setup.zip` (the installer), not the repository's source-code zip. If it's still missing, use **files → setup → Run with PowerShell** as described in [Install](#install). |
+| Setup says it couldn't download, or the safety check failed | Check your internet connection and run **Install Eagles PDF viewer** again. If your network blocks github.com, use `EaglesPDF-win-x64.zip` and `Install.cmd` instead (see [Other ways to install](#other-ways-to-install)). |
 | *"Couldn't save"* | The file may be open in another app, or in a read-only or locked folder. Use **Save as…** to save a copy somewhere else. |
 | Measurements look wrong | Check the scale on the measuring bar. *Scale not set* means 1:1 (real paper size). Set the scale or calibrate. |
 | Some of the paper is still visible around a signature | Tap the Signature tool, add the image again, and move **Remove background** further right. Photos with shadows usually need more. |
@@ -279,7 +286,7 @@ These keys always do the same thing in their situation:
 
 ### How it's built
 
-Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with [MuPDF](https://mupdf.com/) compiled to WebAssembly.
+Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders PDFs with [MuPDF](https://mupdf.com/) compiled to WebAssembly.
 
 | Part | Role |
 |---|---|
@@ -293,10 +300,10 @@ Inkleaf is an [Electron](https://www.electronjs.org/) app that renders PDFs with
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
 | `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, and the open/save flow. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
-| `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Inkleaf PDF.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
+| `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Eagles PDF viewer.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
 | `tools/devserver.js` | Runs the same UI in a normal browser for testing. |
 
-Shapes are standard annotations: box and cloud are `Square` (the cloud uses the PDF's cloudy border effect), line and arrow are `Line`, text and callout are `FreeText` (the callout uses the `FreeTextCallout` intent with a callout line), and signatures are `Stamp` annotations with a transparent image. Each one Inkleaf creates carries an `InkleafShape` key. The viewer draws those from MuPDF's own SVG of the saved appearance, so what you see is exactly what other apps see. Text boxes are sized to the number of lines MuPDF wraps the text into.
+Shapes are standard annotations: box and cloud are `Square` (the cloud uses the PDF's cloudy border effect), line and arrow are `Line`, text and callout are `FreeText` (the callout uses the `FreeTextCallout` intent with a callout line), and signatures are `Stamp` annotations with a transparent image. Each one the app creates carries an `InkleafShape` key (internal keys keep the app's earlier name, Inkleaf, so files marked up with older versions keep working). The viewer draws those from MuPDF's own SVG of the saved appearance, so what you see is exactly what other apps see. Text boxes are sized to the number of lines MuPDF wraps the text into.
 
 Erase areas are `Redact` annotations with an `InkleafShape` key until you save. Saving applies them to a temporary copy of the document: MuPDF's redaction removes the text, covered line art and image pixels under them (other annotations are detached from the page meanwhile, so they survive), the areas are painted white, and the whole file is rewritten with garbage collection, so no old copy of the erased content stays in it. A retyped line is one item (a `Redact` annotation whose `InkleafShape` key holds the text, size, colour, baseline origin, the old line's box and the laid-out glyph runs). The viewer draws it from MuPDF's SVG of those glyphs in the chosen font. On save, the old line's box is redacted and whited out, the font is embedded (`addFont`, with our own `ToUnicode` map), and the text is written into the page content as glyph runs. Everything happens in the order it was made, so a later erase area also removes earlier edited text. The font is the page's own embedded font when its glyphs (captured from the page's text) cover the new text; otherwise the installed font found by `electron/fontindex.js` (name tables of the system fonts, with metric-compatible fallbacks such as Carlito for Calibri), fetched by the worker and subset on save; otherwise a base-14 font. **Embed markups** does the same on a temporary copy, then bakes every annotation into the page content (`bake`, with form widgets left alone).
 
@@ -326,12 +333,15 @@ node tools/build-win.js arm64   # ARM (Surface Pro with Microsoft SQ chips)
 
 The x64 build produces:
 
-- `dist/InkleafPDF-Setup.zip`: the small installer. It holds `Install Inkleaf PDF.cmd` (built from `windows/Setup.cmd`), `README.txt`, and a `files` folder with the app and `setup.ps1`. The runtime is downloaded and verified during setup.
-- `dist/InkleafPDF-win-x64.zip`: the full app with the runtime included (`Install.cmd`).
+- `dist/EaglesPDF-Setup.zip`: the small installer. It holds `Install Eagles PDF viewer.cmd` (built from `windows/Setup.cmd`), `README.txt`, and a `files` folder with the app and `setup.ps1`. The runtime is downloaded and verified during setup.
+- `dist/EaglesPDF-win-x64.zip`: the full app with the runtime included (`Install.cmd`).
 
-The ARM build produces `dist/InkleafPDF-win-arm64.zip` only.
+The ARM build produces `dist/EaglesPDF-win-arm64.zip` only.
 
-To publish a version, raise `version` in `package.json`, build, then create a [GitHub release](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases/new) and attach `InkleafPDF-Setup.zip`. Attaching `InkleafPDF-win-x64.zip` too is optional. The [Install](#install) steps link to the latest release.
+### Publish a version
+
+1. Raise `version` in `package.json`, run `node tools/build-win.js x64`, and copy `dist/EaglesPDF-Setup.zip` into `downloads/`. The download link at the top of this page points there.
+2. Optional, for the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases) with both packages (the small installer and the complete 150 MB one): open the **Actions** tab, choose **Build and release**, and click **Run workflow**. GitHub builds both packages on its own servers and publishes them as a release named after the version.
 
 ### Tests
 

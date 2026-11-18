@@ -1,7 +1,7 @@
 {
-  "name": "inkleaf",
-  "productName": "Inkleaf PDF",
-  "version": "1.4.1",
+  "name": "eagles-pdf-viewer",
+  "productName": "Eagles PDF viewer",
+  "version": "1.5.0",
   "description": "Fast touch & pen PDF reader and annotator",
   "main": "electron/main.js",
   "private": true,

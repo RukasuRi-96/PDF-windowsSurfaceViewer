@@ -1,0 +1,45 @@
+# Builds Eagles PDF viewer for Windows on GitHub's servers and publishes a
+# release with both packages. Run it from the Actions tab: "Build and
+# release" > "Run workflow".
+name: Build and release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the Windows packages
+        run: node tools/build-win.js x64
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          cat > notes.md <<NOTES
+          **Eagles PDF viewer $V for Windows 10 and 11 (64-bit).**
+
+          - **EaglesPDF-Setup.zip** (about 5 MB, recommended): extract it and double-click **Install Eagles PDF viewer**. Setup downloads the Electron runtime from Electron's official GitHub releases and checks its fingerprint.
+          - **EaglesPDF-win-x64.zip** (about 150 MB, complete): everything included, for PCs without internet during setup. Extract it and double-click **Install.cmd**.
+
+          If Windows says "Windows protected your PC", click **More info**, then **Run anyway** (the app isn't code-signed). Your settings are kept when you update.
+          NOTES
+          if gh release view "v$V" >/dev/null 2>&1; then
+            gh release upload "v$V" dist/EaglesPDF-Setup.zip dist/EaglesPDF-win-x64.zip --clobber
+          else
+            gh release create "v$V" dist/EaglesPDF-Setup.zip dist/EaglesPDF-win-x64.zip --title "Eagles PDF viewer $V" --notes-file notes.md --latest
+          fi

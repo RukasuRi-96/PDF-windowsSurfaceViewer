@@ -188,6 +188,10 @@ input { font: inherit; color: inherit; user-select: text; }
 .viewer[data-tool="eraser"] { cursor: cell; }
 .viewer[data-tool="measure"] { cursor: crosshair; }
 .viewer[data-tool="content"] { cursor: crosshair; }
+/* A pen near the screen shows a dot (the Pen tool's is its ink colour and size), not a crosshair. */
+.viewer.pen-near[data-tool="pen"] { cursor: var(--pen-cursor, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4' fill='white' fill-opacity='.85'/%3E%3Ccircle cx='5' cy='5' r='2.5' fill='%23222'/%3E%3C/svg%3E") 5 5, crosshair); }
+.viewer.pen-near[data-tool="highlight"], .viewer.pen-near[data-tool="box"], .viewer.pen-near[data-tool="content"],
+.viewer.pen-near[data-tool="measure"], .viewer.pen-near[data-tool="sign"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4' fill='white' fill-opacity='.85'/%3E%3Ccircle cx='5' cy='5' r='2.5' fill='%23222'/%3E%3C/svg%3E") 5 5, crosshair; }
 .viewer[data-tool="select"].over-text { cursor: text; }
 .viewer.panning, .viewer.panning[data-tool] { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
@@ -353,9 +357,7 @@ input { font: inherit; color: inherit; user-select: text; }
 .empty-card .btn.primary { height: 44px; }
 .empty-card .tips { list-style: none; padding: 0; margin: 26px 0 0; font-size: 13px; line-height: 1.9; }
 .empty-card .tips b { color: var(--text); font-weight: 600; }
-.logo { width: 64px; height: 64px; margin: 0 auto; border-radius: 16px; background: linear-gradient(135deg, #3a7bff, #7b5cff); position: relative; box-shadow: var(--shadow); }
-.logo::before { content: ""; position: absolute; left: 18px; top: 13px; width: 26px; height: 36px; border-radius: 3px; background: #fff; }
-.logo::after { content: ""; position: absolute; left: 24px; top: 34px; width: 22px; height: 5px; border-radius: 3px; background: #ffd23a; transform: rotate(-24deg); }
+.logo { display: block; width: 96px; height: 96px; margin: 0 auto; object-fit: contain; }
 
 #loading { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; z-index: 4; }
 .loading #loading { display: flex; }

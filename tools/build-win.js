@@ -1,4 +1,4 @@
-// Builds the Windows app: dist/InkleafPDF-win-<arch>/ and a .zip of it.
+// Builds the Windows app: dist/EaglesPDF-win-<arch>/ and a .zip of it.
 // usage: node tools/build-win.js [x64|arm64]
 const fs = require("fs");
 const path = require("path");
@@ -52,20 +52,20 @@ function findCachedElectronZip(name) {
     platform: "win32",
     arch,
     electronVersion,
-    name: "InkleafPDF",
-    executableName: "InkleafPDF",
+    name: "EaglesPDF",
+    executableName: "EaglesPDF",
     appVersion: pkg.version,
     icon: path.join(ROOT, "electron", "icon.ico"),
     asar: true,
     overwrite: true,
     prune: false,
-    appCopyright: "Inkleaf PDF",
+    appCopyright: "Eagles PDF viewer",
     win32metadata: {
-      CompanyName: "Inkleaf",
-      FileDescription: "Inkleaf PDF",
-      ProductName: "Inkleaf PDF",
-      InternalName: "InkleafPDF",
-      OriginalFilename: "InkleafPDF.exe",
+      CompanyName: "Eagles",
+      FileDescription: "Eagles PDF viewer",
+      ProductName: "Eagles PDF viewer",
+      InternalName: "EaglesPDF",
+      OriginalFilename: "EaglesPDF.exe",
     },
   });
 
@@ -75,7 +75,7 @@ function findCachedElectronZip(name) {
 
   // 4. Installer scripts + readme.
   for (const f of ["Install.cmd", "Uninstall.cmd", "README.txt"]) {
-    const txt = fs.readFileSync(path.join(ROOT, "windows", f), "utf8").replace(/\r?\n/g, "\r\n");
+    const txt = fs.readFileSync(path.join(ROOT, "windows", f), "utf8").replace("__APP_VERSION__", pkg.version).replace(/\r?\n/g, "\r\n");
     fs.writeFileSync(path.join(outDir, f), txt);
   }
 
@@ -86,7 +86,7 @@ function findCachedElectronZip(name) {
   fs.copyFileSync(path.join(outDir, "LICENSE"), path.join(lic, "Electron-MIT.txt"));
 
   // 5. Zip.
-  const folder = `InkleafPDF-win-${arch}`;
+  const folder = `EaglesPDF-win-${arch}`;
   const final = path.join(DIST, folder);
   fs.rmSync(final, { recursive: true, force: true });
   fs.renameSync(outDir, final);
@@ -99,11 +99,11 @@ function findCachedElectronZip(name) {
   // 6. Small setup package: the app (app.asar) + a script that fetches the
   //    official Electron runtime from GitHub on the target PC and verifies it.
   //    Flat layout, so "Extract All" shows one thing to double-click:
-  //      Install Inkleaf PDF.cmd   README.txt   files\ (app.asar, setup.ps1, ...)
+  //      Install Eagles PDF viewer.cmd   README.txt   files\ (app.asar, setup.ps1, ...)
   if (arch === "x64") {
     const cacheZip = findCachedElectronZip(`electron-v${electronVersion}-win32-x64.zip`);
     const sha = require("crypto").createHash("sha256").update(fs.readFileSync(cacheZip)).digest("hex");
-    const setupName = "InkleafPDF-Setup";
+    const setupName = "EaglesPDF-Setup";
     const sdir = path.join(DIST, setupName);
     fs.rmSync(sdir, { recursive: true, force: true });
     const files = path.join(sdir, "files");
@@ -111,7 +111,7 @@ function findCachedElectronZip(name) {
     fs.copyFileSync(path.join(final, "resources", "app.asar"), path.join(files, "app.asar"));
     fs.copyFileSync(path.join(ROOT, "electron", "icon.ico"), path.join(files, "icon.ico"));
     copyDir(path.join(final, "licenses"), path.join(files, "licenses"));
-    const place = { "Setup.cmd": "Install Inkleaf PDF.cmd", "README.txt": "README.txt", "setup.ps1": "files/setup.ps1", "Uninstall.cmd": "files/Uninstall.cmd" };
+    const place = { "Setup.cmd": "Install Eagles PDF viewer.cmd", "README.txt": "README.txt", "setup.ps1": "files/setup.ps1", "Uninstall.cmd": "files/Uninstall.cmd" };
     for (const [f, to] of Object.entries(place)) {
       let txt = fs.readFileSync(path.join(ROOT, "windows", f), "utf8");
       txt = txt.replace("__APP_VERSION__", pkg.version).replace("__ELECTRON_VERSION__", electronVersion).replace("__ELECTRON_SHA256__", sha);

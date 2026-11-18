@@ -1,4 +1,4 @@
-// Inkleaf PDF — Electron main process.
+// Eagles PDF viewer — Electron main process.
 const { app, BrowserWindow, ipcMain, dialog, protocol, shell, nativeTheme, Menu, screen, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -19,6 +19,19 @@ const MIME = {
 const isWin = process.platform === "win32";
 
 if (process.env.INKLEAF_USER_DATA) app.setPath("userData", process.env.INKLEAF_USER_DATA);
+else migrateSettings();
+
+// Until 1.4 the app was called "Inkleaf PDF": the first time the new name
+// starts, bring over its settings, signatures and shortcuts.
+function migrateSettings() {
+  try {
+    const now = app.getPath("userData");
+    const old = path.join(app.getPath("appData"), "Inkleaf PDF");
+    if (fs.existsSync(path.join(now, "config.json")) || !fs.existsSync(old)) return;
+    fs.mkdirSync(now, { recursive: true });
+    for (const f of fs.readdirSync(old)) if (/\.json$/i.test(f)) fs.copyFileSync(path.join(old, f), path.join(now, f));
+  } catch {}
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -75,7 +88,7 @@ function createWindow() {
     minWidth: 420,
     minHeight: 360,
     show: false,
-    title: "Inkleaf PDF",
+    title: "Eagles PDF viewer",
     icon: path.join(__dirname, isWin ? "icon.ico" : "icon.png"),
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#1b1c20" : "#f4f5f7",
     ...(isWin ? { titleBarStyle: "hidden", titleBarOverlay: overlayColors() } : {}),

@@ -47,6 +47,10 @@ export class Engine {
     this.onRendered = null; // (task, bitmap) => void
     this.editChain = Promise.resolve();
     this.activeRenderers = [];
+    this.thumbQueue = [];   // page thumbnails: rendered only when the page view is idle
+    this.onThumb = null;    // (task, bitmap) => void
+    this.password = null;
+    this.rendererCount = renderCount;
   }
 
   async ready() {
@@ -64,10 +68,12 @@ export class Engine {
     const gen = this.gen;
     const info = await this.edit.call("open", { url, password });
     if (info.needsPassword) return info;
+    this.password = password || null;
     // Big files: fewer render workers so we don't multiply memory use.
     let n = this.renderers.length;
     if (sizeBytes > 150e6) n = 1;
     else if (sizeBytes > 60e6) n = Math.min(n, 2);
+    this.rendererCount = n;
     this.activeRenderers = [];
     const opens = this.renderers.slice(0, n).map(async (r) => {
       r.docOpen = false;
@@ -90,9 +96,47 @@ export class Engine {
     return { pages, needsPassword: false };
   }
 
+  // ---- pages (see worker pageOp). Resolves with { pages, before } where
+  // `before` is the document as it was (bytes), for undo.
+  pageOp(op) { return this._edit(() => this.edit.call("pages", { op })).then((r) => this._structure(r)); }
+  restore(bytes) { return this._edit(() => this.edit.call("restore", { bytes }, [bytes.buffer])).then((r) => this._structure(r)); }
+  countPagesOf(url, password) { return this.edit.call("countPagesOf", { url, password }); }
+  merge(files) { return this._edit(() => this.edit.call("merge", { files })); }
+
+  // The page structure changed: renderers reopen the new bytes; queued and
+  // in-flight tiles of the old document are dropped.
+  _structure(r) {
+    if (!r) return null;
+    this.gen++;
+    this.queue = [];
+    this.thumbQueue = [];
+    const gen = this.gen;
+    this.activeRenderers = [];
+    for (const rd of this.renderers.slice(0, this.rendererCount)) {
+      rd.docOpen = false;
+      const copy = r.bytes.slice();
+      rd.call("open", { bytes: copy, password: this.password }, [copy.buffer]).then((ri) => {
+        if (gen !== this.gen || ri.needsPassword) return;
+        rd.docOpen = true;
+        this.activeRenderers.push(rd);
+        this._pump();
+      }).catch((err) => console.warn("reopen failed", err));
+    }
+    const b = r.bounds, pages = [];
+    for (let i = 0; i < r.pageCount; i++) pages.push({ x0: b[i * 4], y0: b[i * 4 + 1], x1: b[i * 4 + 2], y1: b[i * 4 + 3] });
+    return { pages, before: r.before };
+  }
+
+  // Thumbnails: [{ key, page, res, bbox }], rendered after all page tiles.
+  setThumbQueue(tasks) {
+    this.thumbQueue = tasks.filter((t) => !this.inFlight.has(t.key));
+    this._pump();
+  }
+
   close() {
     this.gen++;
     this.queue = [];
+    this.thumbQueue = [];
     this.editChain = Promise.resolve();
     this.edit.call("close");
     for (const r of this.renderers) { r.docOpen = false; r.call("close"); }
@@ -108,14 +152,15 @@ export class Engine {
   _pump() {
     for (const r of this.activeRenderers) {
       if (r.busy || !r.docOpen) continue;
-      const task = this.queue.shift();
+      const task = this.queue.shift() || this.thumbQueue.shift();
       if (!task) return;
       r.busy = true;
       const gen = this.gen;
       this.inFlight.set(task.key, task);
-      r.call("render", { page: task.page, res: task.res, bbox: task.bbox })
+      r.call(task.thumb ? "thumb" : "render", { page: task.page, res: task.res, bbox: task.bbox })
         .then((out) => {
-          if (gen === this.gen && this.onRendered) this.onRendered(task, out.bitmap);
+          const cb = task.thumb ? this.onThumb : this.onRendered;
+          if (gen === this.gen && cb) cb(task, out.bitmap);
           else out.bitmap.close();
         })
         .catch((err) => {
@@ -130,7 +175,7 @@ export class Engine {
   }
 
   get idle() {
-    return this.queue.length === 0 && this.inFlight.size === 0;
+    return this.queue.length === 0 && ![...this.inFlight.values()].some((t) => !t.thumb);
   }
 
   // ---- edit worker (serialized so annotation ops apply in order) ----
