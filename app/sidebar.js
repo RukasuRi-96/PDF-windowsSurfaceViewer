@@ -26,6 +26,9 @@ export class Sidebar {
     this.expanded = new Set();
     this.current = null;
     this.filter = "";
+    this.picked = new Set();  // files selected for merging (Ctrl/Shift+click, or "Select" mode)
+    this.anchor = null;
+    this.picking = false;
     container.innerHTML = `
       <div class="sb-head">
         <button class="sb-root" title="Choose folder (Ctrl+O)">
@@ -37,12 +40,16 @@ export class Sidebar {
       </div>
       <label class="sb-search">${icon("search")}<input type="search" placeholder="Filter PDFs" spellcheck="false"><button class="sb-clear" title="Clear">${icon("x")}</button></label>
       <div class="sb-list" tabindex="-1"><div class="sb-spacer"></div></div>
+      <div class="sb-pickbar" hidden><span class="sb-pickcount"></span><button class="btn sb-pickclear">Cancel</button><button class="btn primary sb-merge">${icon("merge")} Merge…</button></div>
       <div class="sb-foot"></div>`;
     this.el = container;
     this.listEl = container.querySelector(".sb-list");
     this.spacer = container.querySelector(".sb-spacer");
     this.foot = container.querySelector(".sb-foot");
     this.input = container.querySelector("input");
+    this.pickbar = container.querySelector(".sb-pickbar");
+    container.querySelector(".sb-pickclear").onclick = () => this.clearPicked();
+    container.querySelector(".sb-merge").onclick = () => { if (this.picked.size) cb.onMerge?.(this.pickedList()); };
     container.querySelector(".sb-root").onclick = () => cb.onPickFolder();
     container.querySelector(".sb-refresh").onclick = () => cb.onRefresh();
     container.querySelector(".sb-collapse").onclick = () => { this.expanded.clear(); this._rebuild(); cb.onExpanded?.([...this.expanded]); };
@@ -59,7 +66,11 @@ export class Sidebar {
     this.listEl.addEventListener("click", (e) => this._click(e));
     this.listEl.addEventListener("contextmenu", (e) => {
       const row = this._rowFromEvent(e);
-      if (row) { e.preventDefault(); cb.onContext?.(row.file ? row.file.path : row.dir.path, e.clientX, e.clientY, !!row.file); }
+      if (!row) return;
+      e.preventDefault();
+      const p = row.file ? row.file.path : row.dir.path;
+      const picks = row.file && this.picked.has(p) && this.picked.size > 1 ? this.pickedList() : null;
+      cb.onContext?.(p, e.clientX, e.clientY, !!row.file, picks);
     });
   }
 
@@ -76,6 +87,13 @@ export class Sidebar {
   setTree(tree, expanded) {
     this.tree = tree;
     if (tree) sortTree(tree);
+    if (this.picked.size) {
+      const all = new Set();
+      const walk = (n) => { for (const d of n.dirs) walk(d); for (const f of n.files) all.add(f.path); };
+      if (tree) walk(tree);
+      for (const p of [...this.picked]) if (!all.has(p)) this.picked.delete(p);
+      this._pickChanged();
+    }
     if (expanded) this.expanded = new Set(expanded);
     else if (tree) {
       // First visit: open everything if small, else just the top level.
@@ -93,6 +111,45 @@ export class Sidebar {
     const walk = (n) => { for (const d of n.dirs) walk(d); for (const f of n.files) out.push(f.path); };
     if (this.tree) walk(this.tree);
     return out;
+  }
+
+  // Every PDF in a folder and its subfolders, in list order.
+  filesUnder(dirPath) {
+    let node = null;
+    const find = (n) => { if (n.path === dirPath) { node = n; return true; } return n.dirs.some(find); };
+    if (this.tree) find(this.tree);
+    const out = [];
+    const walk = (n) => { for (const d of n.dirs) walk(d); for (const f of n.files) out.push(f.path); };
+    if (node) walk(node);
+    return out;
+  }
+
+  // ---- choosing several files (to merge them)
+  pickedList() {
+    return this.orderedFiles().filter((p) => this.picked.has(p));
+  }
+
+  startPicking(path) {
+    this.picking = true;
+    if (path) { this.picked.add(path); this.anchor = path; }
+    this._pickChanged();
+  }
+
+  clearPicked() {
+    this.picked.clear();
+    this.picking = false;
+    this.anchor = null;
+    this._pickChanged();
+  }
+
+  _pickChanged() {
+    const n = this.picked.size;
+    this.el.classList.toggle("picking", this.picking || n > 0);
+    this.pickbar.hidden = !(this.picking || n > 0);
+    this.pickbar.querySelector(".sb-pickcount").textContent = `${n} selected`;
+    this.pickbar.querySelector(".sb-merge").disabled = n < 2;
+    this._paint();
+    this.cb.onPicked?.(n);
   }
 
   setCurrent(path) {
@@ -177,8 +234,9 @@ export class Sidebar {
       } else {
         const f = r.file;
         const cur = f.path === this.current ? " current" : "";
+        const pk = this.picked.has(f.path) ? " picked" : "";
         const name = f.name.replace(/\.pdf$/i, "");
-        html += `<div class="sb-row file${cur}" data-k="${k}" style="top:${k * ROW_H}px;padding-left:${pad + 18}px" title="${escapeHtml(f.path)}">${icon("file", "kind")}<span class="name">${escapeHtml(name)}</span></div>`;
+        html += `<div class="sb-row file${cur}${pk}" data-k="${k}" style="top:${k * ROW_H}px;padding-left:${pad + 18}px" title="${escapeHtml(f.path)}"><span class="sb-check">${pk ? icon("check") : ""}</span>${icon("file", "kind")}<span class="name">${escapeHtml(name)}</span></div>`;
       }
     }
     if (!this.tree) {
@@ -205,7 +263,28 @@ export class Sidebar {
       this._rebuild();
       this.cb.onExpanded?.([...this.expanded]);
     } else {
-      this.cb.onOpen(r.file.path);
+      const p = r.file.path;
+      // Like File Explorer: the open file counts as selected when Ctrl- or
+      // Shift-clicking another one.
+      if ((e.shiftKey || e.ctrlKey || e.metaKey) && !this.picked.size && !this.picking && this.current && this.current !== p) {
+        this.picked.add(this.current);
+        this.anchor = this.current;
+      }
+      if (e.shiftKey && this.anchor) {
+        // A range, in list order, from the last file clicked.
+        const files = this.rows.filter((x) => x.file).map((x) => x.file.path);
+        const a = files.indexOf(this.anchor), b = files.indexOf(p);
+        if (a >= 0 && b >= 0) for (let k = Math.min(a, b); k <= Math.max(a, b); k++) this.picked.add(files[k]);
+        this._pickChanged();
+      } else if (e.ctrlKey || e.metaKey || this.picking) {
+        if (this.picked.has(p)) this.picked.delete(p); else this.picked.add(p);
+        this.anchor = p;
+        this._pickChanged();
+      } else {
+        if (this.picked.size) this.clearPicked();
+        this.anchor = p;
+        this.cb.onOpen(p);
+      }
     }
   }
 }

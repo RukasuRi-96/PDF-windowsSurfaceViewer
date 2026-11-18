@@ -89,6 +89,22 @@ EDIT THE PAGE'S CONTENT (X)
   areas): what is under them is removed from the PDF for good. Use
   Save as to keep the original.
 
+PAGES (button at the top right, or Ctrl+Shift+P)
+  A thumbnail of every page. Click one to go there; Ctrl/Shift+click
+  selects several. Delete key or the bin button deletes them. The +
+  button (or right-click a page; with a finger, press and hold) adds a
+  blank page (A4, A3, A5, Letter, Legal, Tabloid, portrait or landscape)
+  or pages from another PDF, and duplicates, rotates or moves pages.
+  Drag pages with the mouse or pen to reorder them. Ctrl+Z undoes.
+
+MERGE PDFS
+  In the file list, Ctrl+click the PDFs you want (Shift+click for a
+  range), right-click one of them > "Merge N PDFs...". Or right-click a
+  folder > "Merge all PDFs in this folder..." (subfolders included).
+  Set the order, choose where to save; the merged PDF opens.
+  With a finger: press and hold a PDF > "Select for merging", tap the
+  others, then tap "Merge..." at the bottom of the list.
+
 SAVING
   Ctrl+S saves the annotations straight into the PDF as standard PDF
   annotations, so they show up in Acrobat, Edge, Bluebeam, etc.

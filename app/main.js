@@ -2,6 +2,7 @@ import { host } from "./host.js";
 import { Engine } from "./engine.js";
 import { Viewer, cssColor } from "./viewer.js";
 import { Sidebar } from "./sidebar.js";
+import { PagesPanel, moveOrder } from "./pages.js";
 import { icon } from "./icons.js";
 import { Keymap, comboFromEvent, formatCombo } from "./shortcuts.js";
 import { loadSignatureImage, analyzeSignature, removeBackground, signaturePng, fromDataUrl, imageMime, IMAGE_EXT } from "./sigproc.js";
@@ -24,6 +25,8 @@ const cfg = Object.assign(
     measure: null,
     scales: {},           // path -> { all: scale, pages: { index: scale } }
     sidebarOpen: true,
+    pagesOpen: false,     // the Pages panel on the right
+    blankSize: "A4",      // last size chosen for a blank page
     sidebarW: 300,
     shape: "box",         // box tool: box | line | arrow | cloud | callout | text
     textStyle: null,
@@ -74,6 +77,7 @@ const state = { path: null, gen: 0, saving: false };
 const viewer = new Viewer($("#viewer"), engine, {
   onPage(i, n) {
     pagePill.textContent = `${i + 1} / ${n}`;
+    pagesPanel.setCurrent(i);
     if (cfg.tool === "measure") updateMeasureBar();
     rememberView();
     pokeIdle();
@@ -98,11 +102,37 @@ const viewer = new Viewer($("#viewer"), engine, {
   onPlacing: (on) => appEl.classList.toggle("placing", on),
   onShapeSelect: () => { updateStyleButton(); if (!pop.hidden && popAnchor === $("#btn-style") && cfg.tool === "select") closePopover(); },
   onHistory(canUndo, canRedo, dirty) {
-    $("#btn-undo").disabled = !canUndo;
-    $("#btn-redo").disabled = !canRedo;
+    updateUndoButtons();
     appEl.classList.toggle("dirty", dirty);
     updateTitle();
   },
+  // A new edit: page changes that were undone can no longer be redone.
+  onEdit: () => { docHist.redo = []; updateUndoButtons(); },
+});
+
+// Undo/redo of page changes (delete, add, move...): the whole document as it
+// was before each one. Annotation edits made since then are undone first.
+const docHist = { undo: [], redo: [] };
+function updateUndoButtons() {
+  $("#btn-undo").disabled = !(viewer.canUndo || docHist.undo.length);
+  $("#btn-redo").disabled = !(viewer.canRedo || docHist.redo.length);
+}
+function undo() {
+  if (viewer.canUndo) viewer.undo();
+  else if (docHist.undo.length) restoreDoc(docHist.undo, docHist.redo, "Page change undone");
+}
+function redo() {
+  if (viewer.canRedo) viewer.redo();
+  else if (docHist.redo.length) restoreDoc(docHist.redo, docHist.undo, "Page change redone");
+}
+
+const pagesPanel = new PagesPanel($("#pages"), engine, {
+  onGo: (i) => viewer.goToPage(i),
+  onDelete: (list) => deletePages(list),
+  onMove: (order, moved) => movePages(order, moved),
+  onMenu: (i, x, y) => pageMenu({ x, y }),
+  onAddMenu: (anchor) => addPagesMenu(anchor),
+  onClose: () => togglePages(false),
 });
 
 const sidebar = new Sidebar($("#sidebar"), {
@@ -110,16 +140,14 @@ const sidebar = new Sidebar($("#sidebar"), {
   onPickFolder: () => pickFolder(),
   onRefresh: () => cfg.folder && loadFolder(cfg.folder, false),
   onExpanded: (list) => { if (cfg.folder) { cfg.expanded[cfg.folder] = list; saveCfg(); } },
-  onContext: (p, x, y, isFile) => showMenu({ x, y }, [
-    isFile && { label: "Open", run: () => openFile(p) },
-    { label: "Show in folder", icon: "external", run: () => host.showInFolder(p) },
-    { label: "Copy path", icon: "copy", run: () => navigator.clipboard.writeText(p) },
-  ]),
+  onContext: (p, x, y, isFile, picks) => fileMenu({ x, y }, p, isFile, picks),
+  onMerge: (list) => mergeDialog(list),
 });
 
 // ------------------------------------------------------------------ toolbar
 const setIcon = (sel, name) => { $(sel).innerHTML = icon(name); };
 setIcon("#btn-sidebar", "sidebar");
+setIcon("#btn-pages", "pages");
 setIcon("#btn-undo", "undo");
 setIcon("#btn-redo", "redo");
 setIcon("#btn-zoomout", "zoomOut");
@@ -239,8 +267,9 @@ $("#tools").addEventListener("click", (e) => {
 $("#btn-style").onclick = () => (cfg.tool === "measure" ? openMeasurePopover() : openStylePopover());
 $("#btn-touch").onclick = () => setTouchDraws(!cfg.touchDraws);
 $("#btn-sidebar").onclick = () => toggleSidebar();
-$("#btn-undo").onclick = () => viewer.undo();
-$("#btn-redo").onclick = () => viewer.redo();
+$("#btn-undo").onclick = () => undo();
+$("#btn-redo").onclick = () => redo();
+$("#btn-pages").onclick = () => togglePages();
 $("#btn-zoomin").onclick = () => viewer.zoomBy(1.25);
 $("#btn-zoomout").onclick = () => viewer.zoomBy(0.8);
 $("#btn-fitw").onclick = () => viewer.fit("width");
@@ -266,6 +295,11 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   { label: "Save as…", key: keyOf("file.saveAs"), run: () => save({ as: true }), disabled: !state.path },
   { label: "Show in folder", icon: "external", run: () => host.showInFolder(state.path), disabled: !state.path },
   { label: "Embed markups…", icon: "layers", key: keyOf("file.embed"), run: () => embedMarkups(), disabled: !state.path },
+  "-",
+  { label: cfg.pagesOpen ? "Hide pages" : "Pages: delete, add, move, rotate", icon: "pages", key: keyOf("pages.panel"), run: () => togglePages() },
+  { label: "Add a blank page…", icon: "filePlus", key: keyOf("pages.blank"), run: () => blankPageDialog(), disabled: !state.path },
+  { label: "Insert pages from another PDF…", icon: "openFile", key: keyOf("pages.insert"), run: () => insertPagesDialog(null), disabled: !state.path },
+  { label: "Merge all PDFs in the folder…", icon: "merge", key: keyOf("file.mergeFolder"), run: () => mergeFolder(), disabled: !cfg.folder },
   "-",
   { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
   { label: "Drawing scale…", icon: "ruler", run: () => scaleDialog(), disabled: !state.path },
@@ -446,6 +480,8 @@ async function showHelp() {
     ["Shapes tool ▾", "Box, line, arrow, cloud, callout or text; it always draws, even on top of other markups"],
     ["Typing in a text box", "Enter finishes · Shift+Enter starts a new line · Esc cancels"],
     ["Edit content tool", "Drag a box to erase an area · tap a line of text to retype it (same font, size and colour); tap it again to change it"],
+    ["Pages panel", "Click a page to go to it · drag pages to reorder (mouse or pen) · right-click (or press and hold) to add, copy in, duplicate, rotate or delete"],
+    ["File list: Ctrl+click / Shift+click", "Select several PDFs, then right-click › Merge · right-click a folder › Merge all PDFs in this folder"],
     ["Callout", "Drag from the spot you're marking to where the text goes, then type"],
     ["Signature tool", "Pick a signature, drag it into place, Place; tap a placed one to move, resize or delete it"],
     ["Measure tool", "Drag or click two points; path and area: click points, double-click or Enter to finish"],
@@ -920,7 +956,7 @@ async function confirmDiscard() {
   if (!viewer.dirty) return true;
   const r = await dialog({
     title: "Save changes?",
-    message: `“${baseName(state.path)}” has annotations that aren't saved yet.`,
+    message: `“${baseName(state.path)}” has changes that aren't saved yet.`,
     buttons: [{ id: "cancel", label: "Cancel" }, { id: "discard", label: "Don't save" }, { id: "save", label: "Save", primary: true }],
   });
   if (r === "save") { await save(); return !viewer.dirty; }
@@ -959,6 +995,9 @@ async function openFile(path, { force = false } = {}) {
     if (!res.pages.length) throw new Error("this PDF has no pages");
     viewer.open(gen, res.pages, cfg.files[path]);
     viewer.setTool(cfg.tool);
+    docHist.undo = []; docHist.redo = [];
+    pagesPanel.setDocument(res.pages, viewer.currentPage());
+    updateUndoButtons();
     updateMeasureBar();
     $("#zoom-label").textContent = Math.round((viewer.scale * 72 / 96) * 100) + "%";
     if (narrow()) toggleSidebar(false);
@@ -966,6 +1005,7 @@ async function openFile(path, { force = false } = {}) {
     if (gen !== state.gen) return;
     state.path = null;
     viewer.close();
+    pagesPanel.clear();
     appEl.classList.add("no-doc");
     $("#empty-msg").textContent = err.message === "cancelled" ? "Pick a PDF from the list." : `Couldn't open “${baseName(path)}”: ${err.message}`;
     updateTitle();
@@ -973,6 +1013,320 @@ async function openFile(path, { force = false } = {}) {
     clearTimeout(spin);
     if (gen === state.gen) appEl.classList.remove("loading");
   }
+}
+
+// ------------------------------------------------------------------ pages
+// Delete, add, copy in, duplicate, move and rotate pages. Each change is one
+// undo step (the document before it is kept); saving writes the new pages.
+const PAPER = [["A4", 210, 297, "mm"], ["A3", 297, 420, "mm"], ["A5", 148, 210, "mm"], ["Letter", 8.5, 11, "in"], ["Legal", 8.5, 14, "in"], ["Tabloid", 11, 17, "in"]];
+const pageWord = (n) => (n === 1 ? "1 page" : `${n} pages`);
+const range = (a, n) => Array.from({ length: n }, (_, k) => a + k);
+let pagesBusy = false;
+
+function togglePages(force) {
+  cfg.pagesOpen = force ?? !cfg.pagesOpen;
+  pagesPanel.show(cfg.pagesOpen);
+  $("#btn-pages").classList.toggle("on", cfg.pagesOpen);
+  saveCfg();
+}
+
+function showNewPages(pages, focus, keep, select) {
+  const gen = ++state.gen;
+  focus = Math.max(0, Math.min(pages.length - 1, focus));
+  viewer.open(gen, pages, { mode: keep?.mode, scale: keep?.scale, sx: keep?.sx, page: focus, offset: focus === keep?.page ? keep.offset : 0 });
+  viewer.setTool(cfg.tool);
+  viewer.markChanged();
+  pagesPanel.setDocument(pages, focus, select);
+  updateUndoButtons();
+  updateTitle();
+}
+
+async function changePages(op, { focus, select, done } = {}) {
+  if (!state.path || pagesBusy || state.saving) return false;
+  viewer.commitEdits();
+  if (viewer.placing) viewer.finishPlacing(true);
+  pagesBusy = true;
+  const spin = setTimeout(() => appEl.classList.add("loading"), 150);
+  const keep = viewer.viewState();
+  try {
+    const r = await engine.pageOp(op);
+    if (!r) return false;
+    docHist.undo.push({ bytes: r.before });
+    if (docHist.undo.length > 20) docHist.undo.shift();
+    docHist.redo = [];
+    showNewPages(r.pages, focus ?? keep.page, keep, select);
+    if (done) toast(done);
+    return true;
+  } catch (err) {
+    toast("Couldn't change the pages: " + err.message, "error");
+    return false;
+  } finally {
+    clearTimeout(spin);
+    appEl.classList.remove("loading");
+    pagesBusy = false;
+  }
+}
+
+async function restoreDoc(from, to, msg) {
+  if (pagesBusy || !state.path) return;
+  pagesBusy = true;
+  const item = from.pop();
+  const keep = viewer.viewState();
+  try {
+    const r = await engine.restore(item.bytes.slice());
+    if (!r) { from.push(item); return; }
+    to.push({ bytes: r.before });
+    showNewPages(r.pages, keep.page, keep);
+    toast(msg);
+  } catch (err) {
+    from.push(item);
+    toast("Couldn't undo that: " + err.message, "error");
+  } finally {
+    pagesBusy = false;
+    updateUndoButtons();
+  }
+}
+
+const pageCount = () => viewer.pageCount;
+const chosenPages = () => { const s = pagesPanel.open ? pagesPanel.selected() : []; return s.length ? s : [viewer.currentPage()]; };
+
+function deletePages(list) {
+  if (!list.length) return;
+  if (list.length >= pageCount()) { toast("A PDF needs at least one page", "error"); return; }
+  const first = Math.min(...list);
+  changePages({ kind: "delete", pages: list }, { focus: Math.min(first, pageCount() - list.length - 1), done: `Deleted ${pageWord(list.length)} · Ctrl+Z to undo` });
+}
+
+function movePages(order, moved) {
+  const set = new Set(moved);
+  const now = order.map((old, k) => (set.has(old) ? k : -1)).filter((k) => k >= 0);
+  changePages({ kind: "move", order }, { focus: now[0], select: now, done: `Moved ${pageWord(moved.length)}` });
+}
+
+function movePagesTo(list, to) {
+  const order = moveOrder(pageCount(), list, to);
+  if (order) movePages(order, list);
+}
+
+function rotatePages(list, by) {
+  changePages({ kind: "rotate", pages: list, by }, { focus: list[0], select: list });
+}
+
+function duplicatePages(list) {
+  const at = Math.max(...list) + 1;
+  changePages({ kind: "duplicate", pages: list, at }, { focus: at, select: range(at, list.length), done: `Duplicated ${pageWord(list.length)}` });
+}
+
+// Right-click (or press and hold) on a page in the panel.
+function pageMenu(at) {
+  const list = chosenPages(), n = list.length, last = Math.max(...list);
+  showMenu(at, [
+    { label: "Insert blank page…", icon: "filePlus", key: keyOf("pages.blank"), run: () => blankPageDialog(last + 1) },
+    { label: "Insert pages from another PDF…", icon: "openFile", key: keyOf("pages.insert"), run: () => insertPagesDialog(null, last + 1) },
+    { label: n > 1 ? `Duplicate ${n} pages` : "Duplicate page", icon: "duplicate", run: () => duplicatePages(list) },
+    "-",
+    { label: "Rotate right", icon: "rotateCw", key: keyOf("pages.rotateRight"), run: () => rotatePages(list, 90) },
+    { label: "Rotate left", icon: "rotateCcw", key: keyOf("pages.rotateLeft"), run: () => rotatePages(list, -90) },
+    { label: "Move to the start", run: () => movePagesTo(list, 0), disabled: list.every((p, k) => p === k) },
+    { label: "Move to the end", run: () => movePagesTo(list, pageCount()), disabled: list.every((p, k) => p === pageCount() - n + k) },
+    "-",
+    { label: n > 1 ? `Delete ${n} pages` : "Delete page", icon: "trash", key: keyOf("pages.delete"), run: () => deletePages(list), disabled: n >= pageCount() },
+    { label: "Select all pages", run: () => pagesPanel.selectAll() },
+  ]);
+}
+
+function addPagesMenu(anchor) {
+  const at = pagesPanel.insertAt();
+  showMenu(anchor, [
+    { label: "Blank page…", icon: "filePlus", key: keyOf("pages.blank"), run: () => blankPageDialog(at) },
+    { label: "Pages from another PDF…", icon: "openFile", key: keyOf("pages.insert"), run: () => insertPagesDialog(null, at) },
+    { label: "Duplicate the selected pages", icon: "duplicate", run: () => duplicatePages(chosenPages()) },
+  ]);
+}
+
+// Where new pages go: a choice of positions around page `at`.
+function whereOptions(at) {
+  const n = pageCount(), ref = Math.max(1, Math.min(n, at));
+  return `<option value="${at}">After page ${ref}</option>` + (ref > 1 || at === 0 ? `<option value="${ref - 1}">Before page ${ref}</option>` : "") +
+    (at !== n ? `<option value="${n}">At the end</option>` : "") + (at !== 0 ? `<option value="0">At the start</option>` : "");
+}
+
+async function blankPageDialog(at = pagesPanel.insertAt()) {
+  if (!state.path) return;
+  closePopover();
+  const ref = viewer.doc.pages[Math.max(0, Math.min(pageCount() - 1, at - 1))];
+  const sameMm = `${Math.round((ref.w * 25.4) / 72)} × ${Math.round((ref.h * 25.4) / 72)} mm`;
+  const sizes = PAPER.map(([k, w, h, u]) => `<option value="${k}"${cfg.blankSize === k ? " selected" : ""}>${k} (${w} × ${h} ${u})</option>`).join("");
+  const r = await dialog({
+    title: "Add a blank page",
+    html: `<div class="form">
+      <label class="field">Size<select id="bp-size"><option value="same"${cfg.blankSize === "same" ? " selected" : ""}>Same as page ${Math.max(1, at)} (${sameMm})</option>${sizes}</select></label>
+      <div class="field">Orientation<div class="radios"><label><input type="radio" name="bp-or" value="p" checked> Portrait</label><label><input type="radio" name="bp-or" value="l"> Landscape</label></div></div>
+      <label class="field">Where<select id="bp-where">${whereOptions(at)}</select></label>
+      <label class="field">How many<input id="bp-count" type="number" min="1" max="100" value="1"></label>
+    </div>`,
+    buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Add", primary: true }],
+    collect: (d) => ({ size: d.querySelector("#bp-size").value, land: d.querySelector('input[name="bp-or"]:checked').value === "l", where: +d.querySelector("#bp-where").value, count: Math.max(1, Math.min(100, Math.round(+d.querySelector("#bp-count").value || 1))) }),
+  });
+  if (!r || r.id !== "ok") return;
+  const o = r.data;
+  cfg.blankSize = o.size;
+  saveCfg();
+  let w, h;
+  if (o.size === "same") { w = ref.w; h = ref.h; } else {
+    const [, a, b, u] = PAPER.find(([k]) => k === o.size);
+    const f = u === "mm" ? 72 / 25.4 : 72;
+    w = a * f; h = b * f;
+  }
+  if (o.size !== "same" && o.land) [w, h] = [h, w];
+  if (o.size === "same" && o.land !== w > h) [w, h] = [h, w];
+  changePages({ kind: "blank", at: o.where, w: Math.round(w * 100) / 100, h: Math.round(h * 100) / 100, count: o.count }, { focus: o.where, select: range(o.where, o.count), done: `Added ${pageWord(o.count)}` });
+}
+
+// "1-3, 5, 8-" -> 0-based page numbers (null if it doesn't make sense).
+function parsePages(text, n) {
+  const t = text.trim().toLowerCase();
+  if (!t || t === "all") return [...Array(n).keys()];
+  const out = [];
+  for (const part of t.split(/[,;\s]+/).filter(Boolean)) {
+    const m = part.match(/^(\d*)\s*[-–]\s*(\d*)$/) || part.match(/^(\d+)$/);
+    if (!m) return null;
+    const a = m[1] ? +m[1] : 1, b = m.length > 2 ? (m[2] ? +m[2] : n) : a;
+    if (a < 1 || b > n || a > b) return null;
+    for (let k = a; k <= b; k++) out.push(k - 1);
+  }
+  return out;
+}
+
+// Copy pages of another PDF into this one.
+async function insertPagesDialog(path, at = pagesPanel.insertAt()) {
+  if (!state.path) return;
+  closePopover();
+  path = path || (await host.pickFile());
+  if (!path) return;
+  const url = host.fileUrl(path);
+  let password = null, count = 0;
+  for (;;) {
+    try { count = await engine.countPagesOf(url, password); break; } catch (err) {
+      if (!/password/i.test(err.message)) { toast("Couldn't read that PDF: " + err.message, "error"); return; }
+      const pw = await dialog({ title: "Password required", message: `“${baseName(path)}” is protected. Enter its password:`, input: { type: "password" }, buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Open", primary: true }] });
+      if (pw == null || pw === "cancel") return;
+      password = pw;
+    }
+  }
+  const r = await dialog({
+    title: "Insert pages",
+    html: `<p class="hint" style="margin-bottom:14px">From “${esc(baseName(path))}” (${pageWord(count)}).</p><div class="form">
+      <label class="field">Pages<input id="ip-pages" type="text" value="all" placeholder="all, or e.g. 1-3, 5" autocomplete="off"></label>
+      <label class="field">Where<select id="ip-where">${whereOptions(at)}</select></label>
+      <p class="hint" id="ip-msg"></p>
+    </div>`,
+    buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Insert", primary: true }],
+    onMount: (d) => { const i = d.querySelector("#ip-pages"); i.focus(); i.select(); },
+    collect: (d) => ({ pages: d.querySelector("#ip-pages").value, where: +d.querySelector("#ip-where").value }),
+  });
+  if (!r || r.id !== "ok") return;
+  const pages = parsePages(r.data.pages, count);
+  if (!pages || !pages.length) { toast(`Pages must be between 1 and ${count}, like 1-3, 5`, "error"); return; }
+  changePages({ kind: "insert", url, password, pages, at: r.data.where }, { focus: r.data.where, select: range(r.data.where, pages.length), done: `Inserted ${pageWord(pages.length)} from “${baseName(path)}”` });
+}
+
+// ------------------------------------------------------------------ merging
+const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, "");
+const sepOf = (p) => (p.includes("\\") ? "\\" : "/");
+
+function fileMenu(at, p, isFile, picks) {
+  if (picks && picks.length > 1) {
+    showMenu(at, [
+      { label: `Merge ${picks.length} PDFs…`, icon: "merge", run: () => mergeDialog(picks) },
+      { label: "Clear the selection", icon: "x", run: () => sidebar.clearPicked() },
+    ]);
+  } else if (isFile) {
+    showMenu(at, [
+      { label: "Open", run: () => openFile(p) },
+      { label: "Select for merging", icon: "check", run: () => sidebar.startPicking(p) },
+      state.path && { label: "Insert into the open PDF…", icon: "filePlus", run: () => insertPagesDialog(p) },
+      "-",
+      { label: "Show in folder", icon: "external", run: () => host.showInFolder(p) },
+      { label: "Copy path", icon: "copy", run: () => navigator.clipboard.writeText(p) },
+    ]);
+  } else {
+    const files = sidebar.filesUnder(p);
+    showMenu(at, [
+      { label: `Merge all ${files.length} PDFs in this folder…`, icon: "merge", run: () => mergeDialog(files, p), disabled: files.length < 2 },
+      "-",
+      { label: "Show in folder", icon: "external", run: () => host.showInFolder(p) },
+      { label: "Copy path", icon: "copy", run: () => navigator.clipboard.writeText(p) },
+    ]);
+  }
+}
+
+function mergeFolder() {
+  if (!cfg.folder) { toast("Open a folder first"); return; }
+  mergeDialog(sidebar.filesUnder(cfg.folder), cfg.folder);
+}
+
+// Choose the order, then save the merged PDF (and open it).
+async function mergeDialog(paths, folder = null) {
+  closePopover();
+  let list = paths.slice();
+  if (list.length < 2) { toast("Choose at least two PDFs to merge"); return; }
+  const root = cfg.folder || "";
+  const render = (d) => {
+    const box = d.querySelector(".merge-list");
+    box.innerHTML = list.map((p, k) => {
+      const rel = root && p.startsWith(root) ? dirOf(p).slice(root.length).replace(/^[\\/]/, "") : "";
+      return `<div class="ml-row" data-k="${k}"><span class="ml-n">${k + 1}</span><span class="ml-name" title="${esc(p)}">${esc(baseName(p).replace(/\.pdf$/i, ""))}${rel ? `<span class="ml-dir">${esc(rel)}</span>` : ""}</span>` +
+        `<button class="btn" data-mv="-1" title="Move up"${k ? "" : " disabled"}>${icon("chevron")}</button><button class="btn" data-mv="1" title="Move down"${k < list.length - 1 ? "" : " disabled"}>${icon("chevron")}</button><button class="btn" data-rm title="Leave out">${icon("x")}</button></div>`;
+    }).join("");
+    const ok = d.querySelector(".row .primary");
+    ok.textContent = `Merge ${list.length} PDFs…`;
+    ok.disabled = list.length < 2;
+  };
+  const r = await dialog({
+    title: folder ? `Merge “${baseName(folder)}”` : "Merge PDFs",
+    wide: true,
+    html: `<p>The pages of each PDF are added in this order${folder ? " (subfolders included)" : ""}. Use the arrows to change it.</p><div class="merge-list"></div>`,
+    buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Merge", primary: true }],
+    onMount: (d) => {
+      render(d);
+      d.querySelector(".merge-list").addEventListener("click", (e) => {
+        const row = e.target.closest(".ml-row"), b = e.target.closest("button");
+        if (!row || !b) return;
+        const k = +row.dataset.k;
+        if (b.dataset.rm != null) list.splice(k, 1);
+        else { const j = k + +b.dataset.mv; [list[k], list[j]] = [list[j], list[k]]; }
+        render(d);
+      });
+    },
+  });
+  if (r !== "ok" || list.length < 2) return;
+  const base = folder || dirOf(list[0]);
+  const name = folder ? `${baseName(folder)} (merged).pdf` : "Merged.pdf";
+  await mergeFiles(list, base + sepOf(base) + name);
+}
+
+async function mergeFiles(list, defaultPath) {
+  const spin = setTimeout(() => appEl.classList.add("loading"), 100);
+  toast(`Merging ${list.length} PDFs…`);
+  let out;
+  try {
+    out = await engine.merge(list.map((p) => ({ url: host.fileUrl(p), name: baseName(p) })));
+  } catch (err) {
+    toast("Couldn't merge: " + err.message, "error");
+    return;
+  } finally {
+    clearTimeout(spin);
+    appEl.classList.remove("loading");
+  }
+  const target = await host.saveAs(defaultPath, out.bytes);
+  if (!target) return;
+  sidebar.clearPicked();
+  const merged = list.length - out.failed.length;
+  toast(`Merged ${merged} PDFs (${pageWord(out.pages)}) into “${baseName(target)}”`);
+  if (out.failed.length) toast(`Left out: ${out.failed.map((f) => `${f.name} (${f.why})`).join(", ")}`, "error");
+  if (cfg.folder) loadFolder(cfg.folder, false);
+  openFile(target);
 }
 
 // Embed every markup into the pages, so it can no longer be moved, edited or
@@ -1224,6 +1578,16 @@ const COMMANDS = [
   { id: "file.save", group: "File", label: "Save", keys: ["Ctrl+S"], typing: true, run: () => save() },
   { id: "file.saveAs", group: "File", label: "Save as…", keys: ["Ctrl+Shift+S"], typing: true, run: () => save({ as: true }) },
   { id: "file.embed", group: "File", label: "Embed markups into the pages…", keys: [], when: () => !!state.path, run: () => embedMarkups() },
+  { id: "file.mergeFolder", group: "File", label: "Merge all PDFs in the folder…", keys: [], when: () => !!cfg.folder, run: () => mergeFolder() },
+  { id: "file.mergeSelected", group: "File", label: "Merge the selected PDFs…", keys: [], when: () => sidebar.picked.size > 1, run: () => mergeDialog(sidebar.pickedList()) },
+  // Pages
+  { id: "pages.panel", group: "Pages", label: "Show / hide the Pages panel", keys: ["Ctrl+Shift+P"], typing: true, run: () => togglePages() },
+  { id: "pages.blank", group: "Pages", label: "Add a blank page…", keys: [], when: hasDoc, run: () => blankPageDialog() },
+  { id: "pages.insert", group: "Pages", label: "Insert pages from another PDF…", keys: [], when: hasDoc, run: () => insertPagesDialog(null) },
+  { id: "pages.duplicate", group: "Pages", label: "Duplicate the selected pages", keys: [], when: hasDoc, run: () => duplicatePages(chosenPages()) },
+  { id: "pages.delete", group: "Pages", label: "Delete the selected pages", keys: [], when: hasDoc, run: () => deletePages(chosenPages()) },
+  { id: "pages.rotateRight", group: "Pages", label: "Rotate the selected pages right", keys: [], when: hasDoc, run: () => rotatePages(chosenPages(), 90) },
+  { id: "pages.rotateLeft", group: "Pages", label: "Rotate the selected pages left", keys: [], when: hasDoc, run: () => rotatePages(chosenPages(), -90) },
   { id: "file.showInFolder", group: "File", label: "Show in folder", keys: [], when: () => !!state.path, run: () => host.showInFolder(state.path) },
   { id: "file.next", group: "File", label: "Next PDF in the list", keys: ["Alt+ArrowDown"], run: () => stepFile(1) },
   { id: "file.prev", group: "File", label: "Previous PDF in the list", keys: ["Alt+ArrowUp"], run: () => stepFile(-1) },
@@ -1231,8 +1595,8 @@ const COMMANDS = [
   { id: "file.sidebar", group: "File", label: "Show / hide the file list", keys: ["Ctrl+B"], typing: true, run: () => toggleSidebar() },
   { id: "file.refresh", group: "File", label: "Refresh the file list", keys: ["F5"], when: () => !!cfg.folder, run: () => loadFolder(cfg.folder, false) },
   // Edit
-  { id: "edit.undo", group: "Edit", label: "Undo", keys: ["Ctrl+Z"], run: () => viewer.undo() },
-  { id: "edit.redo", group: "Edit", label: "Redo", keys: ["Ctrl+Y", "Ctrl+Shift+Z"], run: () => viewer.redo() },
+  { id: "edit.undo", group: "Edit", label: "Undo", keys: ["Ctrl+Z"], run: () => undo() },
+  { id: "edit.redo", group: "Edit", label: "Redo", keys: ["Ctrl+Y", "Ctrl+Shift+Z"], run: () => redo() },
   { id: "edit.copy", group: "Edit", label: "Copy selected text", keys: ["Ctrl+C"], when: () => viewer.hasSelection, run: () => copyText(viewer.sel.text) },
   { id: "edit.selectAll", group: "Edit", label: "Select all text on the page", keys: ["Ctrl+A"], when: hasDoc, run: () => { if (cfg.tool !== "select") setTool("select"); viewer.selectAllOnPage(); } },
   { id: "edit.editText", group: "Edit", label: "Edit the selected text box or callout", keys: ["Enter", "F2"], when: () => ["text", "callout"].includes(viewer.selectedShape), run: () => viewer.editSelectedText() },
@@ -1338,6 +1702,7 @@ const TITLES = {
   "edit.redo": ["#btn-redo", "Redo"],
   "file.save": ["#btn-save", "Save"],
   "file.sidebar": ["#btn-sidebar", "Show/hide files"],
+  "pages.panel": ["#btn-pages", "Pages: delete, add, move and rotate pages"],
   "view.zoomIn": ["#btn-zoomin", "Zoom in"],
   "view.zoomOut": ["#btn-zoomout", "Zoom out"],
   "view.fitWidth": ["#btn-fitw", "Fit width"],
@@ -1475,6 +1840,7 @@ host.onCloseRequest(async () => {
 // ------------------------------------------------------------------ start
 appEl.classList.add("no-doc");
 toggleSidebar(cfg.sidebarOpen);
+togglePages(cfg.pagesOpen);
 applyStyles();
 setWheel(cfg.wheel, false);
 setTool(cfg.tool);

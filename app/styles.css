@@ -507,3 +507,55 @@ select {
   #btn-touch, #btn-redo { display: none; }
   #mb-text { min-width: 0; }
 }
+
+/* ---------- pages panel ---------- */
+#pages { width: 188px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--border); min-height: 0; outline: 0; }
+#pages[hidden] { display: none; }
+.pp-head { display: flex; align-items: center; gap: 0; padding: 7px 4px 7px 12px; border-bottom: 1px solid var(--border); }
+.pp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; font-size: 14px; white-space: nowrap; }
+.pp-count { color: var(--muted); font-weight: 400; }
+.pp-head .icon-btn { width: 32px; height: 34px; flex: none; }
+.pp-list { flex: 1; overflow-y: auto; position: relative; touch-action: pan-y; overscroll-behavior: contain; }
+.pp-inner { position: relative; }
+.pp-item { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.pp-thumb { width: 132px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); outline: 3px solid transparent; outline-offset: 2px; border-radius: 2px; overflow: hidden; }
+.pp-thumb canvas { display: block; width: 100%; height: 100%; }
+.pp-item.current .pp-thumb { outline-color: var(--accent-soft); }
+.pp-item.sel .pp-thumb { outline-color: var(--accent); }
+.pp-num { height: 22px; line-height: 22px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pp-item.sel .pp-num { color: var(--accent); font-weight: 600; }
+.pp-drop { position: absolute; left: 14px; right: 14px; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.pp-drop[hidden] { display: none; }
+#pages.dragging .pp-item { cursor: grabbing; }
+.pp-ghost { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; width: 64px; opacity: 0.9; box-shadow: var(--shadow); background: #fff; border-radius: 2px; }
+.pp-ghost canvas { display: block; width: 100%; height: auto; }
+.pp-badge { position: absolute; right: -8px; top: -8px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; line-height: 22px; text-align: center; }
+#btn-pages.on { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 860px) {
+  #pages { position: absolute; right: 0; top: 0; bottom: 0; z-index: 8; box-shadow: var(--shadow); }
+}
+
+/* ---------- choosing files to merge ---------- */
+.sb-row .sb-check { display: none; width: 18px; height: 18px; flex: none; margin-left: -22px; margin-right: 4px; border: 1.5px solid var(--muted); border-radius: 4px; align-items: center; justify-content: center; color: #fff; }
+.sb-row .sb-check svg { width: 14px; height: 14px; }
+#sidebar.picking .sb-row.file .sb-check { display: flex; }
+.sb-row.picked { background: var(--accent-soft); }
+.sb-row.picked .sb-check { background: var(--accent); border-color: var(--accent); }
+.sb-pickbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--panel); }
+.sb-pickbar[hidden] { display: none; }
+.sb-pickcount { flex: 1; font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-pickbar .btn { height: 36px; padding: 0 12px; flex: none; }
+.sb-pickbar .btn.primary { display: flex; align-items: center; gap: 6px; }
+.sb-pickbar .btn.primary svg { width: 16px; height: 16px; }
+
+/* merge order */
+.merge-list { display: flex; flex-direction: column; gap: 2px; max-height: min(52vh, 420px); overflow-y: auto; margin: 0 0 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; }
+.ml-row { display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 4px 0 8px; border-radius: 8px; }
+.ml-row:hover { background: var(--hover); }
+.ml-n { width: 26px; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.ml-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ml-dir { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.ml-row .btn { width: 34px; height: 34px; padding: 0; min-width: 0 !important; background: transparent !important; }
+.ml-row .btn svg { width: 16px; height: 16px; }
+.ml-row [data-mv="-1"] svg { transform: rotate(-90deg); }
+.ml-row [data-mv="1"] svg { transform: rotate(90deg); }

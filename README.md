@@ -2,7 +2,7 @@
 
 # Eagles PDF viewer
 
-A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
+A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, merges PDFs, lets you delete, add, copy in, move and rotate pages, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
 
 ### ⬇ [Download Eagles PDF viewer for Windows (EaglesPDF-Setup.zip, 5 MB)](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)
 
@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.5.0** · Windows 10 or 11, 64-bit
+**Current version: 1.6.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -95,6 +95,7 @@ The toolbar in the middle holds the tools:
 | **Eraser** | E | Removes the ink, shapes, text, signatures, highlights and measurements you touch. |
 | **Edit content** | X | Drag a box to erase an area of the page; tap a line of the page's own text to retype it. See [Edit the page's content](#6-edit-the-pages-content). |
 | **Measure** | R | Distance, path length and area at the drawing's scale (see below). |
+| **Pages** (top right) | Ctrl+Shift+P | Thumbnails of every page: delete, add blank pages, copy in pages from another PDF, duplicate, move and rotate. See [Pages](#7-pages-delete-add-copy-in-move-rotate). |
 
 - **Colors and thickness:** tap the active tool again, or tap the colored dot next to the tools.
 - **Pen and finger:** the pen uses the selected tool, and a finger always pans and zooms. To draw with a finger, turn on the **finger button** (**T**); you then pan and zoom with two fingers.
@@ -173,7 +174,32 @@ How the font is matched:
 
 > Each line is edited on its own. Longer new text doesn't push the rest of the paragraph along, so for big rewrites erase the paragraph and add a text box instead. Rotated or vertical text can't be retyped, but you can erase it.
 
-### 7. Select and copy text
+### 7. Pages: delete, add, copy in, move, rotate
+
+Click the **Pages** button at the top right (or **Ctrl+Shift+P**) to show a thumbnail of every page on the right. Click it again, or the **×** on the panel, to hide it.
+
+- **Click** a page to go to it. **Ctrl+click** or **Shift+click** selects several.
+- **Delete:** select pages and press **Delete**, or use the bin button.
+- **Add pages:** the **+** button, or right-click a page (with a finger: press and hold):
+  - **Blank page…** in A4, A3, A5, Letter, Legal or Tabloid, or the same size as the page next to it, portrait or landscape, as many as you want, before or after any page;
+  - **Pages from another PDF…**: all of them, or some (like `1-3, 5`);
+  - **Duplicate**.
+- **Move:** drag pages up or down with the mouse or pen, or right-click → **Move to the start / end**.
+- **Rotate:** right-click → **Rotate right / left**.
+- Every change can be undone (**Ctrl+Z**) and redone (**Ctrl+Y**). Saving writes the new pages into the PDF. Pages you delete are removed from the file, not just hidden.
+
+Thumbnails are drawn only for the pages in view, and only after the page you're reading, so even a 500-page PDF stays fast.
+
+You can also right-click a PDF in the file list and choose **Insert into the open PDF…**.
+
+### 8. Merge PDFs
+
+- **Some PDFs:** in the file list, **Ctrl+click** the PDFs you want (or **Shift+click** for a range), then right-click one of them → **Merge N PDFs…**. With a finger: press and hold a PDF → **Select for merging**, then tap the others, and tap **Merge…** at the bottom of the list.
+- **A whole folder:** right-click a folder → **Merge all N PDFs in this folder…**. Subfolders are included. For the whole open folder use **⋯ → Merge all PDFs in the folder…**.
+
+A window shows the PDFs in order. Use the arrows to change the order, or **×** to leave one out, then choose where to save the merged PDF. It opens straight away. Password-protected PDFs are left out (you're told which).
+
+### 9. Select and copy text
 
 1. Choose **Select** (**V**).
 2. Drag over the text you want. A selection can run across several pages, and it scrolls the page when you drag near the edge.
@@ -184,7 +210,7 @@ How the font is matched:
 
 Click on blank paper or press **Esc** to clear the selection.
 
-### 8. Measure drawings
+### 10. Measure drawings
 
 1. **Choose Measure** (**R**). A measuring bar appears at the bottom of the page.
 2. **Set the drawing's scale.** Click the scale button on the left of the measuring bar. It says *Scale not set* until you set one.
@@ -210,7 +236,7 @@ Each measurement is saved into the PDF as a standard PDF measurement markup, wit
 
 > A measurement is only as accurate as the scale. For drawings marked *NTS* (not to scale), or ones that may have been printed or scanned at a different size, calibrate against a known dimension first.
 
-### 9. Save and embed
+### 11. Save and embed
 
 - **Ctrl+S** (or the save button) writes your markups into the PDF as standard annotations. Acrobat, Edge, Bluebeam and other PDF apps show them too, and they stay movable and editable.
 - **Ctrl+Shift+S** saves a copy under a new name.
@@ -251,6 +277,7 @@ The defaults:
 | Ctrl+G | Go to page |
 | Alt+↑ / Alt+↓ | Previous / next PDF in the list |
 | Ctrl+O · Ctrl+F · Ctrl+B · F5 | Open folder · filter files · show/hide the file list · refresh it |
+| Ctrl+Shift+P · Delete (in the panel) | Show/hide the Pages panel · delete the selected pages |
 | F11 · F1 · Ctrl+K | Full screen · help · keyboard shortcuts |
 
 These keys always do the same thing in their situation:
@@ -296,7 +323,9 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 | `app/measure.js` | Drawing scales, units, label formatting and polygon geometry for the measuring tool. |
 | `app/shortcuts.js` | Key combos by physical key position, display names, and the keymap of user overrides on top of the defaults. Every command and its default keys live in the `COMMANDS` list in `app/main.js`. |
 | `app/sigproc.js` | Signature background removal: paper colour from the image border, automatic threshold (Otsu), soft edges, paper-tint removal at stroke edges, ink recolouring, crop and PNG export. |
-| `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. |
+| `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. Ctrl/Shift+click or Select mode picks files to merge. |
+| `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), selection, drag to reorder. |
+| `app/inkgeom.js` | Pressure strokes: width from pen pressure and the stroke's outline, shared by the viewer and the engine. |
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
 | `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, and the open/save flow. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
@@ -306,6 +335,8 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 Shapes are standard annotations: box and cloud are `Square` (the cloud uses the PDF's cloudy border effect), line and arrow are `Line`, text and callout are `FreeText` (the callout uses the `FreeTextCallout` intent with a callout line), and signatures are `Stamp` annotations with a transparent image. Each one the app creates carries an `InkleafShape` key (internal keys keep the app's earlier name, Inkleaf, so files marked up with older versions keep working). The viewer draws those from MuPDF's own SVG of the saved appearance, so what you see is exactly what other apps see. Text boxes are sized to the number of lines MuPDF wraps the text into.
 
 Erase areas are `Redact` annotations with an `InkleafShape` key until you save. Saving applies them to a temporary copy of the document: MuPDF's redaction removes the text, covered line art and image pixels under them (other annotations are detached from the page meanwhile, so they survive), the areas are painted white, and the whole file is rewritten with garbage collection, so no old copy of the erased content stays in it. A retyped line is one item (a `Redact` annotation whose `InkleafShape` key holds the text, size, colour, baseline origin, the old line's box and the laid-out glyph runs). The viewer draws it from MuPDF's SVG of those glyphs in the chosen font. On save, the old line's box is redacted and whited out, the font is embedded (`addFont`, with our own `ToUnicode` map), and the text is written into the page content as glyph runs. Everything happens in the order it was made, so a later erase area also removes earlier edited text. The font is the page's own embedded font when its glyphs (captured from the page's text) cover the new text; otherwise the installed font found by `electron/fontindex.js` (name tables of the system fonts, with metric-compatible fallbacks such as Carlito for Calibri), fetched by the worker and subset on save; otherwise a base-14 font. **Embed markups** does the same on a temporary copy, then bakes every annotation into the page content (`bake`, with form widgets left alone).
+
+Page changes (delete, blank page, insert from another PDF, duplicate, move with `rearrangePages`, rotate) are made to the open document in the edit worker, which then rewrites it in memory with garbage collection (so removed pages' content is gone) and reopens it; the render workers reopen the same bytes. Undo keeps the document as it was before each change. Merging grafts every page of each file into a new document, with one graft map per file so shared fonts and images are copied once.
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
 

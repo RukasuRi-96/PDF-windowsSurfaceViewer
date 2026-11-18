@@ -101,7 +101,8 @@ export class Engine {
   pageOp(op) { return this._edit(() => this.edit.call("pages", { op })).then((r) => this._structure(r)); }
   restore(bytes) { return this._edit(() => this.edit.call("restore", { bytes }, [bytes.buffer])).then((r) => this._structure(r)); }
   countPagesOf(url, password) { return this.edit.call("countPagesOf", { url, password }); }
-  merge(files) { return this._edit(() => this.edit.call("merge", { files })); }
+  // Merging reads other files only, so it isn't tied to the open document.
+  merge(files) { return this.edit.call("merge", { files }); }
 
   // The page structure changed: renderers reopen the new bytes; queued and
   // in-flight tiles of the old document are dropped.

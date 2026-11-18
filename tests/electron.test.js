@@ -1,4 +1,4 @@
-// Real Electron app: select + copy via the clipboard IPC, measure, save, relaunch, erase + embed.
+// Real Electron app: select + copy via the clipboard IPC, measure, save, relaunch, erase + embed, pages panel.
 const { _electron: electron } = require('playwright');
 const OLD = process.env.WORK, SP = process.env.WORK, R = require('path').join(__dirname, '..');
 const MM = 72 / 25.4;
@@ -77,6 +77,16 @@ const MM = 72 / 25.4;
   await p2.waitForFunction(() => !window.__inkleaf.viewer.dirty && window.__inkleaf.viewer.doc?.annotsP.size > 0, null, { timeout: 15000 });
   await p2.waitForTimeout(600);
   console.log('erase + save: markups kept', kept, '· embed over the file: markups left', await p2.evaluate(() => (window.__inkleaf.viewer.doc.annots.get(0) || []).length));
+  // Pages panel in the desktop app: thumbnails render, a blank page is added and saved.
+  await p2.click('#btn-pages');
+  await p2.waitForSelector('.pp-item[data-i="0"] canvas', { timeout: 10000 });
+  await p2.click('.pp-head [data-act=add]'); await p2.click('.menu button:has-text("Blank page")');
+  await p2.waitForSelector('#bp-size'); await p2.click('.dialog .btn.primary');
+  await p2.waitForFunction(() => window.__inkleaf.viewer.pageCount === 2, null, { timeout: 15000 });
+  await p2.keyboard.press('Control+s');
+  await p2.waitForFunction(() => !window.__inkleaf.viewer.dirty, null, { timeout: 15000 });
+  await p2.waitForTimeout(500);
+  console.log('pages panel: thumbnail shown, blank page added and saved:', await p2.evaluate(() => window.__inkleaf.viewer.pageCount), 'pages');
   await app2.close();
   console.log(logs.length ? logs.join('\n') : 'no errors');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
