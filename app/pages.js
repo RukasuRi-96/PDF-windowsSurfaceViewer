@@ -1,8 +1,10 @@
 // Pages panel: a thumbnail of every page, to select, delete, add, copy in,
-// duplicate, rotate and drag pages into a new order (mouse and pen drag;
-// a finger presses and holds a page to lift it). The page being read is
+// duplicate, rotate and drag pages into a new order (mouse and pen drag; a
+// finger drags a page by its grip, or presses and holds it to lift it). Pages
+// dropped on another open PDF are copied there. The page being read is
 // highlighted; pages show their number, their name (the PDF's page label or
-// bookmark), or both.
+// bookmark), or both. With PDFs side by side, the panel shows the one in use;
+// each one's thumbnails are kept, so switching between them is instant.
 //
 // Speed: only the thumbnails in (or near) view exist; they are rendered at
 // thumbnail size by the render workers only after the page view's own tiles,
@@ -13,6 +15,7 @@ const THUMB_W = 132;   // thumbnail width (CSS px)
 const LABEL_H = 22;
 const GAP = 12;
 const PAD_TOP = 10;
+let GEN = 0;           // thumbnail generations, unique across documents
 
 export class PagesPanel {
   constructor(root, engine, cb) {
@@ -25,7 +28,9 @@ export class PagesPanel {
     this.current = 0;
     this.cache = new Map();   // page -> canvas
     this.items = new Map();   // page -> element
-    this.gen = 0;
+    this.gen = ++GEN;
+    this.key = null;          // which document (side-by-side PDFs share the panel)
+    this.saved = new Map();   // key -> that document's panel state
     this.labelMode = "both"; // number | name | both
     root.tabIndex = -1;
     root.innerHTML = `
@@ -63,7 +68,50 @@ export class PagesPanel {
       cb.onMenu?.(i, e.clientX, e.clientY);
     });
     root.addEventListener("keydown", (e) => this._key(e));
-    engine.onThumb = (task, bmp) => this._onThumb(task, bmp);
+    this._listen(engine);
+  }
+
+  _listen(engine) {
+    engine.onThumb = (task, bmp) => { if (this.engine === engine) this._onThumb(task, bmp); else bmp.close(); };
+  }
+
+  // Show another open document (`key`) in the panel. Its thumbnails, selection
+  // and scroll position come back as they were if its pages haven't changed.
+  switchTo(engine, key, pages, current) {
+    if (key === this.key && engine === this.engine) return;
+    this.engine.setThumbQueue([]);
+    if (this.key != null) this.saved.set(this.key, { pages: this.pages, cache: this.cache, sel: this.sel, anchor: this.anchor, gen: this.gen, scroll: this.list.scrollTop });
+    this.engine = engine;
+    this.key = key;
+    this._listen(engine);
+    const st = this.saved.get(key);
+    this.saved.delete(key);
+    if (st && st.pages === pages) {
+      this.gen = st.gen;
+      this.cache = st.cache;
+      this.inner.textContent = "";
+      this.items.clear();
+      this.pages = pages;
+      this.sel = st.sel;
+      this.anchor = st.anchor;
+      this.current = Math.min(current, Math.max(0, pages.length - 1));
+      this.countEl.textContent = pages.length ? `(${pages.length})` : "";
+      this.hasNames = pages.some((p) => p.name);
+      this._layout();
+      this.list.scrollTop = st.scroll;
+      if (this.open) { this._render(); this.reveal(this.current); }
+    } else {
+      if (st) for (const cv of st.cache.values()) cv.width = 0;
+      this.cache = new Map();
+      this.setDocument(pages, current);
+    }
+  }
+
+  // A document closed: drop what was kept for it.
+  forget(key) {
+    const st = this.saved.get(key);
+    if (st) for (const cv of st.cache.values()) cv.width = 0;
+    this.saved.delete(key);
   }
 
   get open() { return !this.root.hidden; }
@@ -76,7 +124,7 @@ export class PagesPanel {
 
   // A (re)opened document, or its pages changed.
   setDocument(pages, current = 0, select = null) {
-    this.gen++;
+    this.gen = ++GEN;
     for (const cv of this.cache.values()) cv.width = 0;
     this.cache.clear();
     this.inner.textContent = "";
@@ -201,6 +249,11 @@ export class PagesPanel {
     box.style.height = this.heights[i] - LABEL_H + "px";
     const cv = this.cache.get(i);
     if (cv) box.appendChild(cv);
+    const grip = document.createElement("span");
+    grip.className = "pp-grip";
+    grip.title = "Drag to move";
+    grip.innerHTML = icon("grip");
+    box.appendChild(grip);
     const label = document.createElement("div");
     label.className = "pp-num";
     label.textContent = this.labelOf(i);
@@ -224,7 +277,7 @@ export class PagesPanel {
       for (const k of this.cache.keys()) if (k < a - 100 || k > b + 100) { this.cache.get(k).width = 0; this.cache.delete(k); }
     }
     const el = this.items.get(task.page);
-    if (el) el.querySelector(".pp-thumb").replaceChildren(cv);
+    if (el) { const box = el.querySelector(".pp-thumb"); box.querySelector("canvas")?.remove(); box.prepend(cv); }
   }
 
   _paintSel() {
@@ -261,8 +314,11 @@ export class PagesPanel {
     this.root.focus({ preventScroll: true });
     const touch = e.pointerType === "touch";
     const x0 = e.clientX, y0 = e.clientY;
-    let moved = false, held = false, last = e;
-    if (touch) {
+    // The grip moves the page straight away, even with a finger.
+    const grip = !!e.target.closest(".pp-grip");
+    let moved = false, held = grip, last = e;
+    if (grip) { this._hold = true; this.items.get(i)?.classList.add("lifted"); }
+    else if (touch) {
       this._touchAt = performance.now();
       this._holdTimer = setTimeout(() => {
         if (moved) return;
@@ -293,7 +349,7 @@ export class PagesPanel {
       this.list.removeEventListener("pointercancel", up);
       if (this.drag) { this._dragEnd(ev.type === "pointercancel"); return; }
       if (ev.type !== "pointerup") return;
-      if (held && !moved) {
+      if (held && !moved && !grip) {
         if (!this.sel.has(i)) this._select(i, {});
         this.cb.onMenu?.(i, last.clientX, last.clientY);
       } else if (!moved) {
@@ -324,6 +380,10 @@ export class PagesPanel {
     const D = this.drag;
     D.ghost.style.transform = `translate(${ev.clientX - 30}px, ${ev.clientY - 30}px)`;
     const r = this.list.getBoundingClientRect();
+    // Over another open PDF: the pages will be copied there.
+    D.out = ev.clientX < r.left - 4 && this.cb.onDragOut ? this.cb.onDragOut(ev.clientX, ev.clientY, D.pages) : null;
+    D.ghost.classList.toggle("copy", !!D.out);
+    if (D.out || ev.clientX < r.left - 4) { D.to = -1; this.dropEl.hidden = true; D.scroll = 0; return; }
     const y = ev.clientY - r.top + this.list.scrollTop;
     // Insertion point: before the first page whose middle is below the pointer.
     let to = this.pages.length;
@@ -347,6 +407,8 @@ export class PagesPanel {
     D.ghost.remove();
     this.dropEl.hidden = true;
     this.root.classList.remove("dragging");
+    this.cb.onDragOut?.(null);
+    if (!cancel && D.out) { this.cb.onDropOut?.(D.pages, D.out); return; }
     if (!cancel && D.to >= 0) {
       const order = moveOrder(this.pages.length, D.pages, D.to);
       if (order) this.cb.onMove?.(order, D.pages, D.to);

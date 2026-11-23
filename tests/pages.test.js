@@ -153,7 +153,7 @@ const pdfText = (f, p) => execFileSync('pdftotext', ['-f', String(p), '-l', Stri
   await page.click('.sb-row.dir:has-text("Reports")', { button: 'right' });
   const folderLabel = (await page.locator('.menu button').first().textContent()).trim();
   await page.keyboard.press('Escape');
-  await page.click('#viewer', { position: { x: 5, y: 5 } }).catch(() => {});
+  await page.click('.pane.active .pane-view', { position: { x: 5, y: 5 } }).catch(() => {});
   await page.click('.sb-row.dir:has-text("Q3")', { button: 'right' });
   await menu('Merge all 2 PDFs');
   await page.waitForSelector('.merge-list .ml-row');

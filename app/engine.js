@@ -102,6 +102,8 @@ export class Engine {
   restore(bytes) { return this._edit(() => this.edit.call("restore", { bytes }, [bytes.buffer])).then((r) => this._structure(r)); }
   // An area of a page as a PNG ({ png, w, h }), markups included.
   snip(page, rect, res) { return this._edit(() => this.edit.call("snip", { page, rect, res })); }
+  // The open document as it is now, markups included (bytes).
+  snapshot() { return this._edit(() => this.edit.call("snapshot")); }
   countPagesOf(url, password) { return this.edit.call("countPagesOf", { url, password }); }
   // Merging reads other files only, so it isn't tied to the open document.
   merge(files) { return this.edit.call("merge", { files }); }
@@ -142,7 +144,12 @@ export class Engine {
     this.queue = [];
     this.thumbQueue = [];
     this.activeRenderers = [];
-    for (const w of [this.edit, ...this.renderers]) { try { w.worker.terminate(); } catch {} }
+    for (const w of [this.edit, ...this.renderers]) {
+      try { w.worker.terminate(); } catch {}
+      // Calls still waiting would never be answered: end them.
+      for (const p of w.pending.values()) p.reject(new Error("closed"));
+      w.pending.clear();
+    }
   }
 
   close() {

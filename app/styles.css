@@ -521,8 +521,12 @@ select {
 .pp-list { flex: 1; overflow-y: auto; position: relative; touch-action: pan-y; overscroll-behavior: contain; }
 .pp-inner { position: relative; }
 .pp-item { position: absolute; left: 4px; right: 4px; padding-top: 6px; display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; -webkit-user-select: none; }
-.pp-thumb { width: 132px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); outline: 3px solid transparent; outline-offset: 2px; border-radius: 2px; overflow: hidden; }
+.pp-thumb { position: relative; width: 132px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); outline: 3px solid transparent; outline-offset: 2px; border-radius: 2px; overflow: hidden; }
 .pp-thumb canvas { display: block; width: 100%; height: 100%; }
+.pp-grip { position: absolute; top: 4px; right: 4px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(30, 32, 37, 0.55); color: #fff; touch-action: none; cursor: grab; opacity: 0.45; }
+.pp-grip .icon { width: 18px; height: 18px; }
+.pp-item:hover .pp-grip, .pp-item.sel .pp-grip, .pp-item.current .pp-grip { opacity: 1; }
+.pp-ghost.copy::after { content: "+"; position: absolute; left: -10px; top: -10px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .pp-item.sel { background: var(--accent-soft); border-radius: 8px; }
 .pp-item.current .pp-thumb { outline-color: var(--accent); }
 .pp-item.current .pp-num { color: var(--accent); font-weight: 700; }
@@ -565,26 +569,32 @@ select {
 .ml-row [data-mv="-1"] svg { transform: rotate(-90deg); }
 .ml-row [data-mv="1"] svg { transform: rotate(90deg); }
 
-/* ---------- side by side ---------- */
-#app { --side-frac: 0.5; }
-#app.split #viewer { right: calc(var(--side-frac) * 100%); }
-#side { position: absolute; top: 0; bottom: 0; right: 0; width: calc(var(--side-frac) * 100%); display: flex; flex-direction: column; background: var(--stage); border-left: 1px solid var(--border); z-index: 3; }
-#side[hidden] { display: none; }
-#viewer2 { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; outline: 0; }
-#viewer2.viewer { position: relative; inset: auto; }
-.side-split { position: absolute; left: -6px; top: 0; bottom: 0; width: 12px; cursor: col-resize; z-index: 5; touch-action: none; }
-.side-split::after { content: ""; position: absolute; left: 5px; top: 50%; width: 2px; height: 44px; margin-top: -22px; border-radius: 1px; background: var(--muted); opacity: 0.5; }
-.side-head { display: flex; align-items: center; gap: 2px; padding: 4px 6px 4px 12px; background: var(--panel); border-bottom: 1px solid var(--border); min-height: 44px; }
-.side-name { font-weight: 600; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-page { flex: 1; margin-left: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.side-head .icon-btn { width: 34px; height: 34px; flex: none; }
-.side-tools { margin: 0 4px; }
-.side-tools .btn.active { background: var(--accent); color: #fff; }
-#app.split #pagepill, #app.split #measurebar { left: calc((100% - var(--side-frac) * 100%) / 2); }
-/* taller than wide (a tablet held upright): the second PDF goes below */
-#app.split.split-v #viewer { right: 0; bottom: calc(var(--side-frac) * 100%); }
-#app.split-v #side { top: auto; left: 0; width: auto; height: calc(var(--side-frac) * 100%); border-left: 0; border-top: 1px solid var(--border); }
-#app.split-v .side-split { left: 0; right: 0; top: -6px; bottom: auto; width: auto; height: 12px; cursor: row-resize; }
-#app.split-v .side-split::after { left: 50%; top: 5px; width: 44px; height: 2px; margin: 0 0 0 -22px; }
-#app.split.split-v #pagepill, #app.split.split-v #measurebar { left: 50%; bottom: calc(var(--side-frac) * 100% + 18px); }
-#app.split.split-v #measurebar { bottom: calc(var(--side-frac) * 100% + 62px); }
+/* ---------- open PDFs, side by side ---------- */
+#panes { position: absolute; inset: 0; display: flex; }
+#panes.vertical { flex-direction: column; }
+.pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.pane-view { position: relative; flex: 1; min-height: 0; }
+.pane-head { display: none; }
+#panes.multi .pane-head {
+  display: flex; align-items: center; gap: 2px; flex: none; height: 42px; padding: 0 4px 0 4px;
+  background: var(--panel); border-bottom: 1px solid var(--border); touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none;
+}
+#panes.multi .pane.active .pane-head { box-shadow: inset 0 3px 0 var(--accent); }
+.pane-grip { display: flex; align-items: center; justify-content: center; width: 22px; height: 32px; color: var(--muted); flex: none; }
+.pane-grip .icon { width: 16px; height: 16px; }
+.pane-name { font-weight: 600; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane.active .pane-name { color: var(--accent); }
+.pane-dot { display: none; flex: none; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--accent); }
+.pane.dirty .pane-dot { display: block; }
+.pane-page { flex: 1; min-width: 0; margin-left: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.pane-head .icon-btn { width: 34px; min-width: 0; height: 34px; flex: none; }
+.pane.moving { opacity: 0.55; }
+.pane-split { flex: none; width: 10px; margin: 0 -2px; position: relative; z-index: 5; cursor: col-resize; touch-action: none; background: var(--border); background-clip: content-box; padding: 0 4px; }
+.pane-split::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 44px; margin: -22px 0 0 -2px; border-radius: 2px; background: var(--muted); opacity: 0.55; }
+.pane-split.active::after, .pane-split:hover::after { opacity: 1; background: var(--accent); }
+#panes.vertical .pane-split { width: auto; height: 10px; margin: -2px 0; padding: 4px 0; cursor: row-resize; }
+#panes.vertical .pane-split::after { width: 44px; height: 4px; margin: -2px 0 0 -22px; }
+.pane-ghost { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; padding: 8px 14px; border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); font-weight: 600; font-size: 13px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-drop { position: fixed; z-index: 49; width: 4px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.pane-drop.v { width: auto; height: 4px; }
+.pane.drop-target::after { content: "Copy the pages here"; position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--accent); border: 3px dashed var(--accent); background: var(--accent-soft); opacity: 0.92; pointer-events: none; }

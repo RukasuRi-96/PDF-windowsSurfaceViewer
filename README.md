@@ -2,7 +2,7 @@
 
 # Eagles PDF viewer
 
-A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, opens a second PDF side by side, merges PDFs, lets you delete, add, copy in, move and rotate pages, copies any part of a page as a picture you can paste back at the same size, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
+A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, opens up to four PDFs side by side (each one fully editable), merges PDFs, lets you delete, add, copy in, move and rotate pages, copies any part of a page as a picture you can paste back at the same size, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
 
 ### ⬇ [Download Eagles PDF viewer for Windows (EaglesPDF-Setup.zip, 5 MB)](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)
 
@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.7.0** · Windows 10 or 11, 64-bit
+**Current version: 1.8.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -93,7 +93,7 @@ The toolbar in the middle holds the tools:
 | **Shapes** | B | Box, line, arrow, cloud, callout or text. Tap the tool again (or its small ▾) to choose. It always draws, even on top of other markups. See [Shapes, text and callouts](#4-shapes-text-and-callouts). |
 | **Signature** | S | Place your signature, with its background removed. See [Sign](#5-sign). |
 | **Eraser** | E | Removes the ink, shapes, text, signatures, highlights, pictures and measurements you touch. |
-| **Snip** | C | Drag a box, or draw around something, to copy it as a picture. **Ctrl+V** pastes it at exactly the same size, as a picture you can move and resize. See [Snip](#9-snip-copy-part-of-a-page-as-a-picture). |
+| **Snip** | C | Drag a box, or draw around something, to copy it as a picture. Then **tap** where it should go (or press **Ctrl+V**): it's pasted at exactly the same size, as a picture you can move and resize. See [Snip](#9-snip-copy-part-of-a-page-as-a-picture). |
 | **Edit content** | X | Drag a box to erase an area of the page; tap a line of the page's own text to retype it. See [Edit the page's content](#6-edit-the-pages-content). |
 | **Measure** | R | Distance, path length and area at the drawing's scale (see below). |
 | **Pages** (top right) | Ctrl+Shift+P | Thumbnails of every page: delete, add blank pages, copy in pages from another PDF, duplicate, move and rotate. See [Pages](#7-pages-delete-add-copy-in-move-rotate). |
@@ -186,11 +186,12 @@ Click the **Pages** button at the top right (or **Ctrl+Shift+P**) to show a thum
   - **Blank page…** in A4, A3, A5, Letter, Legal or Tabloid, or the same size as the page next to it, portrait or landscape, as many as you want, before or after any page;
   - **Pages from another PDF…**: all of them, or some (like `1-3, 5`);
   - **Duplicate**.
-- **Move:** drag pages up or down with the mouse or pen. With a finger, **press and hold** a page until it lifts, then drag it up or down (hold without moving to get the menu instead). A line shows where it will go. You can also right-click → **Move to the start / end**.
+- **Move:** drag pages up or down with the mouse or pen. With a finger, drag a page by its **grip** (the dotted handle on its corner) straight away, or **press and hold** the page until it lifts, then drag it (hold without moving to get the menu instead). A line shows where it will go. You can also right-click → **Move to the start / end**.
+- **Copy pages into another open PDF:** with PDFs [side by side](#10-side-by-side-several-pdfs-at-once), drag pages out of the panel and drop them on the other PDF (it says *Copy the pages here*). They're added after the page shown there, with their markups, and the PDF you took them from keeps them.
 - **Rotate:** right-click → **Rotate right / left**.
 - Every change can be undone (**Ctrl+Z**) and redone (**Ctrl+Y**). Saving writes the new pages into the PDF. Pages you delete are removed from the file, not just hidden.
 
-Thumbnails are drawn only for the pages in view, and only after the page you're reading, so even a 500-page PDF stays fast.
+Thumbnails are drawn only for the pages in view, and only after the page you're reading, so even a 500-page PDF stays fast. With PDFs side by side, the panel shows the one you're working in and switches as you move between them.
 
 #### Page names
 
@@ -212,22 +213,29 @@ A window shows the PDFs in order. Use the arrows to change the order, or **×** 
    - **drag a box** over what you want; or
    - **draw around it** (a lasso). Only what's inside your outline is copied, and the rest of the picture is see-through.
 3. It's copied straight away, sharp enough to zoom in on, and other apps such as Word, Outlook or Paint can paste it too.
-4. **Paste:** press **Ctrl+V** (it lands where the pointer is), or tap **Paste** on the *Copied* message (it lands in the middle of the view). **⋯ → Paste picture** does the same. You can paste into another page, another PDF, or the PDF open on the other side.
+4. **Paste, no keyboard needed:**
+   - **tap the page** where it should go, with the pen, mouse or a finger (the Snip tool is still on, so a tap pastes and a drag copies again); or
+   - **press and hold** the page with a finger (or right-click) → **Paste picture here**; or
+   - tap **Paste** on the *Copied* message, or **⋯ → Paste picture** (it lands in the middle of the view);
+   - with a keyboard, **Ctrl+V** pastes where the pointer is.
+
+   You can paste into another page, or into any other PDF open side by side.
 5. The picture is pasted at **exactly the same size** as the original, and selected. **Drag** it to move it, and drag a **corner** to make it bigger or smaller; it keeps its proportions. **Delete** removes it.
 
 Pictures copied in other apps (screenshots, photos) paste too, at their normal on-screen size. Saving writes the picture into the PDF as a standard image markup, so it shows in other PDF apps. Use **⋯ → Embed markups…** to make it part of the page.
 
-### 10. Side by side: two PDFs at once
+### 10. Side by side: several PDFs at once
 
-- **Open:** right-click a PDF in the file list (with a finger: press and hold) → **Open side by side**. You can also use **⋯ → Open a PDF side by side…** or **Ctrl+Shift+O**.
-- It opens next to the PDF you're working on, or below it when the window is taller than it is wide (a tablet held upright).
-- **Move around** in either PDF on its own: drag it with a finger, or with the pen or mouse when its **hand** button is on; pinch or Ctrl+wheel to zoom; **↔** fits it to the width. The keyboard (arrows, PgUp/PgDn, Home/End, zoom keys) moves whichever PDF you touched last.
-- **Resize:** drag the bar between the two PDFs.
-- **Copy from it:** tap its **scissors** button and snip, then paste into the PDF you're editing.
-- **Edit it:** you mark up the main PDF. Tap **⇄** to swap the two, then mark up the other one.
-- **Close:** the **×** at the top of the side PDF.
+- **Open:** right-click a PDF in the file list (with a finger: press and hold) → **Open side by side**. You can also use **⋯ → Open a PDF side by side…**, press and hold a page → **Open a PDF side by side…**, or **Ctrl+Shift+O**. Up to four PDFs can be open at once.
+- **They all work the same.** Write, highlight, draw, sign, measure, snip, edit pages, undo and save in any of them: there's no "main" one. The one you touched last is the one in use. Its title bar has a blue line, and the toolbar, the keyboard, the page counter and the Pages panel all follow it.
+- **Move around** in each PDF on its own, just like with one: drag with a finger, pinch to zoom, double-tap, scroll.
+- **Move a PDF:** drag its title bar (with a finger, the pen or the mouse) to another place; a blue line shows where it will go. Or use **⋯** on its title bar → **Move left / Move right**.
+- **Resize:** drag the bar between two PDFs.
+- **Close one:** the **×** on its title bar (or **Ctrl+W** for the one in use). You're asked first if it has unsaved changes. The others share out the room.
+- **Copy from one to another:** snip in one PDF and tap where it should go in another; or drag pages from the Pages panel onto another PDF.
+- **Switch:** tap a PDF, or **Ctrl+Tab** / **Ctrl+Shift+Tab**.
 
-The side PDF has its own renderer, so the main PDF stays as fast as before. The app remembers the side PDF and where you left the divider.
+They sit next to each other, or one above the other when the window is taller than it is wide (a tablet held upright). Clicking a PDF in the file list opens it in the PDF in use (or goes to it if it's already open). Your palm is ignored on every PDF while the pen is writing in one of them. When you start the app again, the same PDFs open side by side, in the same order and sizes.
 
 ### 11. Select and copy text
 
@@ -301,7 +309,7 @@ The defaults:
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / Redo |
 | Ctrl+C / Ctrl+A | Copy selected text / Select all text on the page |
-| Ctrl+V | Paste a snipped picture at the same size |
+| Ctrl+V | Paste a snipped picture at the same size (or tap the page with the Snip tool) |
 | Enter or F2 · Delete or Backspace | Edit the selected text box or callout · delete the selected markup or signature |
 | Ctrl + / Ctrl − / Ctrl+0 / Ctrl+9 / Ctrl+1 | Zoom in / out / fit width / fit page / 100% |
 | PgUp / PgDn / Space · Home / End | Scroll a screen · first / last page |
@@ -309,7 +317,7 @@ The defaults:
 | Alt+↑ / Alt+↓ | Previous / next PDF in the list |
 | Ctrl+O · Ctrl+F · Ctrl+B · F5 | Open folder · filter files · show/hide the file list · refresh it |
 | Ctrl+Shift+P · Delete (in the panel) | Show/hide the Pages panel · delete the selected pages |
-| Ctrl+Shift+O | Open a PDF side by side |
+| Ctrl+Shift+O · Ctrl+W · Ctrl+Tab / Ctrl+Shift+Tab | Open a PDF side by side · close the PDF in use · go to the next / previous PDF side by side |
 | F11 · F1 · Ctrl+K | Full screen · help · keyboard shortcuts |
 
 These keys always do the same thing in their situation:
@@ -356,10 +364,10 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 | `app/shortcuts.js` | Key combos by physical key position, display names, and the keymap of user overrides on top of the defaults. Every command and its default keys live in the `COMMANDS` list in `app/main.js`. |
 | `app/sigproc.js` | Signature background removal: paper colour from the image border, automatic threshold (Otsu), soft edges, paper-tint removal at stroke edges, ink recolouring, crop and PNG export. |
 | `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. Ctrl/Shift+click or Select mode picks files to merge. |
-| `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), the current-page highlight, page names, selection, and drag (or press and hold) to reorder. |
+| `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), the current-page highlight, page names, selection, drag (grip, or press and hold) to reorder or onto another open PDF to copy. It follows the PDF in use and keeps each open PDF's thumbnails. |
 | `app/inkgeom.js` | Pressure strokes: width from pen pressure and the stroke's outline, shared by the viewer and the engine. |
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
-| `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, the open/save flow, snip and paste, and the side-by-side view. |
+| `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, the open/save flow, snip and paste, and the open PDFs (panes) side by side. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
 | `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Eagles PDF viewer.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
 | `tools/devserver.js` | Runs the same UI in a normal browser for testing. |
@@ -374,7 +382,7 @@ Page names come from the PDF's page labels (`/PageLabels`, ignored where they're
 
 The Snip tool asks the edit worker to render just the snipped rectangle (page content, markups and form fields) at the zoom you see it at or at least 144 dpi, capped at 16 megapixels. A lasso is cut out with a canvas clip, which leaves the outside transparent. The PNG goes to the system clipboard together with a small HTML part that marks it as the app's own snip, so pasting it back uses its exact size in points. A pasted picture is a `Stamp` annotation with the image as its appearance, like a signature.
 
-The side-by-side PDF gets its own `Engine` (an edit worker and two render workers) and its own `Viewer`, created only when you open one and stopped when you close it, so a single PDF costs nothing extra.
+Each open PDF is a pane: its own `Engine` (edit worker plus render workers: the first one gets 2–4, others opened side by side get 2), its own `Viewer`, file state and undo history. In `app/main.js`, `engine`, `viewer`, `state` and `docHist` always name the active pane's (the one touched last; a capture-phase `pointerdown` switches it before the viewer sees the touch), and async work such as opening, saving and page changes keeps its own pane, so switching mid-way can't send it to the wrong PDF. Panes opened side by side start their workers on demand and terminate them when closed. The viewers share the tile-memory budget (`setShare`) and the pen's last activity, so palm rejection works across PDFs. Pages dropped on another pane are copied with the `insert` page operation, from a snapshot of the source document as it is (unsaved markups included). The open files, their order and sizes are saved as `openFiles` / `paneWeights` and reopened at start.
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
 

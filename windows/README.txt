@@ -96,7 +96,9 @@ PAGES (button at the top right, or Ctrl+Shift+P)
   blank page (A4, A3, A5, Letter, Legal, Tabloid, portrait or landscape)
   or pages from another PDF, and duplicates, rotates or moves pages.
   Drag pages with the mouse or pen to reorder them; with a finger,
-  press and hold a page until it lifts, then drag it. Ctrl+Z undoes.
+  drag a page by its grip (the dotted handle), or press and hold it
+  until it lifts, then drag it. Drop pages on another PDF open side by
+  side to copy them there. Ctrl+Z undoes.
   The page you are reading is highlighted. If the PDF names its pages
   (like A-101) or has bookmarks, the names are shown too: the tag button
   at the top of the panel switches between numbers, names or both.
@@ -105,18 +107,26 @@ PAGES (button at the top right, or Ctrl+Shift+P)
 SNIP: COPY PART OF A PAGE AS A PICTURE (C)
   Drag a box, or draw around something (a lasso), with the pen, mouse
   or a finger. It is copied as a picture (other apps can paste it too).
-  Ctrl+V pastes it at exactly the same size where the pointer is; or tap
-  "Paste" on the "Copied" message, or More (...) > Paste picture.
+  To paste it at exactly the same size, no keyboard needed: tap the
+  page where it should go (in any open PDF). Or press and hold the
+  page with a finger (or right-click) > "Paste picture here", or tap
+  "Paste" on the "Copied" message. With a keyboard: Ctrl+V.
   Drag the picture to move it, drag a corner to resize it (it keeps its
   proportions), Delete removes it.
 
-SIDE BY SIDE: TWO PDFS AT ONCE
+PRESS AND HOLD THE PAGE (or right-click)
+  Paste picture here, Snip, Open a PDF side by side, Close this PDF.
+
+SIDE BY SIDE: UP TO FOUR PDFS AT ONCE
   Right-click a PDF in the file list (with a finger: press and hold)
-  > "Open side by side", or press Ctrl+Shift+O. Drag the bar between
-  them to resize. Each PDF pans and zooms on its own; the keys move the
-  one you touched last. The scissors button snips from the side PDF so
-  you can paste into yours. The swap button swaps the two (you mark up
-  the main one); X closes the side PDF.
+  > "Open side by side", or press Ctrl+Shift+O.
+  Every PDF works the same: write, draw, sign, snip, change pages, undo
+  and save in any of them. The one you touched last is the one in use
+  (blue line on its title bar); the toolbar, keys and Pages panel
+  follow it. Drag a title bar to move that PDF; drag the bar between
+  two PDFs to resize them; X on a title bar (or Ctrl+W) closes it.
+  Ctrl+Tab goes to the next one. In portrait they stack. The same PDFs
+  open again next time.
 
 MERGE PDFS
   In the file list, Ctrl+click the PDFs you want (Shift+click for a

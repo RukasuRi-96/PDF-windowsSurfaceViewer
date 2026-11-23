@@ -12,9 +12,15 @@ const GAP = 14;                // css px between pages
 const PAD = 16;                // css px around the document
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 48;
-const MAX_TILES = (navigator.deviceMemory || 8) <= 8 ? 180 : 260; // ~1 MB each
+// Tiles kept in memory, shared by every open PDF (~1 MB each).
+const TILE_BUDGET = (navigator.deviceMemory || 8) <= 8 ? 180 : 260;
+// The pen, for palm rejection: shared, so a palm resting on one PDF is
+// ignored while the pen writes in the one next to it.
+const penSeen = { last: -1e9 };
+export const penActive = () => now() - penSeen.last < PALM_MS;
 const MAX_BASES = 40;
 const PALM_MS = 450;           // ignore touch this long after any pen activity
+const HOLD_MS = 520;           // a finger held this long without moving opens the page menu
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const now = () => performance.now();
@@ -201,16 +207,17 @@ export class Viewer {
     this.sel = null;             // current text selection
     this.pointers = new Map();
     this.action = null;
-    this.lastPen = -1e9;
     this.frame = 0;
     this.tileCount = 0;
+    this.maxTiles = TILE_BUDGET; // less each when PDFs are side by side (setShare)
     this.lastTap = null;
     this.dpr = window.devicePixelRatio || 1;
 
     engine.onRendered = (task, bmp) => this._onRendered(task, bmp);
 
     this._measure();
-    new ResizeObserver(() => this._onResize()).observe(root);
+    this._ro = new ResizeObserver(() => this._onResize());
+    this._ro.observe(root);
     this._watchDpr();
 
     root.addEventListener("pointerdown", (e) => this._down(e));
@@ -227,7 +234,13 @@ export class Viewer {
     root.addEventListener("pointercancel", (e) => this._up(e, true));
     root.addEventListener("lostpointercapture", (e) => { if (this.pointers.has(e.pointerId)) this._up(e, true); });
     root.addEventListener("wheel", (e) => this._wheel(e), { passive: false });
-    root.addEventListener("contextmenu", (e) => e.preventDefault());
+    // Right-click (mouse) on the page: the page menu (paste here...). A finger
+    // presses and holds instead (see _startPan); the pen ignores it.
+    root.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      if (this._downType === "mouse" && this.doc && !this.action) this._holdMenu(e.clientX, e.clientY, "mouse");
+    });
+    root.addEventListener("pointerdown", (e) => { this._downType = e.pointerType; }, true);
     // Middle button is ours (drag to pan): no autoscroll or paste.
     root.addEventListener("mousedown", (e) => { if (e.button === 1) e.preventDefault(); });
     root.addEventListener("auxclick", (e) => { if (e.button === 1) e.preventDefault(); });
@@ -289,6 +302,17 @@ export class Viewer {
     this.vbar.style.display = this.hbar.style.display = "none";
   }
 
+  // `n` PDFs open side by side share the tile memory.
+  setShare(n) { this.maxTiles = Math.max(70, Math.round(TILE_BUDGET / Math.max(1, n))); }
+
+  // This view is gone for good (its PDF was closed side by side).
+  destroy() {
+    this.close();
+    this._dead = true;
+    this._ro.disconnect();
+    clearTimeout(this._snipFade);
+  }
+
   get pageCount() { return this.doc ? this.doc.pages.length : 0; }
 
   viewState() {
@@ -318,6 +342,7 @@ export class Viewer {
   _watchDpr() {
     const mq = matchMedia(`(resolution: ${this.dpr}dppx)`);
     mq.addEventListener("change", () => {
+      if (this._dead) return;
       this.dpr = window.devicePixelRatio || 1;
       this._measure();
       if (this.doc) { this._relayoutKeep(); }
@@ -813,12 +838,12 @@ export class Viewer {
 
   _evict(a, b) {
     const d = this.doc;
-    if (this.tileCount > MAX_TILES) {
+    if (this.tileCount > this.maxTiles) {
       const all = [];
       for (const s of d.states.values()) for (const t of s.tiles.values()) all.push([t, s]);
       all.sort((x, y) => x[0].used - y[0].used);
       for (const [t, s] of all) {
-        if (this.tileCount <= MAX_TILES * 0.75) break;
+        if (this.tileCount <= this.maxTiles * 0.75) break;
         if (t.used === this.frame) continue;
         t.cv.remove();
         s.tiles.delete(t.key);
@@ -985,11 +1010,11 @@ export class Viewer {
     const type = e.pointerType;
     const t = now();
     if (type === "pen") {
-      this.lastPen = t;
+      penSeen.last = t;
       // Pen wins: drop whatever the palm/fingers were doing.
       if (this.action && this.action.touch) this._endAction(true);
       for (const p of this.pointers.values()) if (p.type === "touch") p.ignored = true;
-    } else if (type === "touch" && t - this.lastPen < PALM_MS) {
+    } else if (type === "touch" && t - penSeen.last < PALM_MS) {
       return;
     }
     if (type === "mouse" && e.button !== 0 && e.button !== 1) return;
@@ -1016,7 +1041,7 @@ export class Viewer {
         if (a && a.touch && a.kind !== "pan" && a.kind !== "pinch") {
           if (t - a.t0 < 300) this._endAction(true);
           else { ptr.ignored = true; return; }
-        } else if (a) this._endAction(false);
+        } else if (a) { clearTimeout(a.holdTimer); this._endAction(false); }
         this._startPinch();
         return;
       }
@@ -1039,7 +1064,7 @@ export class Viewer {
   }
 
   _move(e) {
-    if (e.pointerType === "pen") this.lastPen = now();
+    if (e.pointerType === "pen") penSeen.last = now();
     if (e.pointerType !== "touch") this._hoverPt = { x: e.clientX, y: e.clientY, t: now() };
     // A hovering pen shows a dot (ink colour and size) instead of a crosshair.
     const pen = e.pointerType === "pen";
@@ -1112,6 +1137,7 @@ export class Viewer {
   _endAction(cancel) {
     const a = this.action;
     this.action = null;
+    if (a?.holdTimer) clearTimeout(a.holdTimer);
     this.root.classList.remove("panning");
     if (!a) return;
     switch (a.kind) {
@@ -1130,10 +1156,29 @@ export class Viewer {
   // ---- pan
   _startPan(ptr, inertia, resumed = false) {
     if (ptr.type === "mouse") this.root.classList.add("panning");
-    this.action = { kind: "pan", pid: ptr.id, touch: ptr.type === "touch", t0: now(), lx: ptr.x, ly: ptr.y, samples: [[now(), ptr.x, ptr.y]], inertia, resumed };
+    const a = this.action = { kind: "pan", pid: ptr.id, touch: ptr.type === "touch", t0: now(), lx: ptr.x, ly: ptr.y, samples: [[now(), ptr.x, ptr.y]], inertia, resumed };
+    // A finger held still on the page opens the page menu (paste here...).
+    if (a.touch && !resumed && !this.placing && this.cb.onHold) {
+      a.holdTimer = setTimeout(() => {
+        if (this.action !== a || this._touchCount() !== 1 || Math.hypot(ptr.x - ptr.x0, ptr.y - ptr.y0) > 10) return;
+        this.action = null;
+        ptr.ignored = true;
+        this._stopInertia();
+        if (navigator.vibrate) { try { navigator.vibrate(15); } catch {} }
+        this._holdMenu(ptr.x, ptr.y, "touch");
+      }, HOLD_MS);
+    }
+  }
+
+  // The page menu at a screen point: which page and where on it.
+  _holdMenu(x, y, type) {
+    const [wx, wy] = this._toWorld(x, y);
+    const i = this._hitPage(wx, wy, 0);
+    this.cb.onHold?.({ page: i >= 0 ? i : null, p: i >= 0 ? this._worldToPage(i, wx, wy) : null, x, y, type });
   }
 
   _movePan(a, ptr) {
+    if (a.holdTimer && Math.hypot(ptr.x - ptr.x0, ptr.y - ptr.y0) > 10) { clearTimeout(a.holdTimer); a.holdTimer = 0; }
     const dx = ptr.x - a.lx, dy = ptr.y - a.ly;
     a.lx = ptr.x; a.ly = ptr.y;
     this.scrollBy(-dx, -dy);
@@ -1143,6 +1188,7 @@ export class Viewer {
   }
 
   _endPan(a, ptr, cancelled) {
+    clearTimeout(a.holdTimer);
     const t = now();
     const moved = Math.hypot(ptr.x - ptr.x0, ptr.y - ptr.y0);
     const tapLike = !cancelled && !a.resumed && moved < (ptr.type === "touch" ? 12 : 6) && t - ptr.t0 < 450;
@@ -1152,6 +1198,8 @@ export class Viewer {
     }
     if (tapLike && this.tool === "select" && this._shapeTap(ptr)) return;
     if (tapLike && this.tool === "content") { this._replaceTap(ptr); return; }
+    // Snip tool: a tap puts the copied picture there.
+    if (tapLike && this.tool === "snip" && this._snipTap(ptr.x, ptr.y)) return;
     if (!cancelled && !a.resumed && ptr.type === "touch" && moved < 12 && t - ptr.t0 < 300) {
       this._tap(ptr);
       return;
@@ -1304,11 +1352,24 @@ export class Viewer {
 
   _finishSnip(a, cancel) {
     const { rect, poly } = this._snipShape(a);
-    if (cancel || (rect[2] - rect[0]) * this.scale < 6 || (rect[3] - rect[1]) * this.scale < 6) { this._clearLive(); return; }
+    if (cancel || (rect[2] - rect[0]) * this.scale < 6 || (rect[3] - rect[1]) * this.scale < 6) {
+      this._clearLive();
+      // Hardly moved: a tap, which pastes the copied picture there.
+      if (!cancel && a.len * this.scale < 6) this.cb.onSnipTap?.(a.page, a.pts[0]);
+      return;
+    }
     this._drawSnip(a, true);
     clearTimeout(this._snipFade);
     this._snipFade = setTimeout(() => { if (!this.action) this._clearLive(); }, 900);
     this.cb.onSnip?.({ page: a.page, rect: rect.map(round2), poly: poly && poly.map((q) => [round2(q[0]), round2(q[1])]), zoom: this.scale * this.dpr });
+  }
+
+  _snipTap(x, y) {
+    const [wx, wy] = this._toWorld(x, y);
+    const i = this._hitPage(wx, wy, 0);
+    if (i < 0 || !this.cb.onSnipTap) return false;
+    this.cb.onSnipTap(i, this._worldToPage(i, wx, wy));
+    return true;
   }
 
   // Where a pasted picture goes: under the pointer if it's over a page,
@@ -2037,8 +2098,8 @@ export class Viewer {
     if (!S || !t) return;
     e.stopPropagation();
     e.preventDefault();
-    if (e.pointerType === "touch" && now() - this.lastPen < PALM_MS) return;
-    if (e.pointerType === "pen") this.lastPen = now();
+    if (e.pointerType === "touch" && now() - penSeen.last < PALM_MS) return;
+    if (e.pointerType === "pen") penSeen.last = now();
     try { t.setPointerCapture(e.pointerId); } catch {}
     this._beginSelDrag(e, t.dataset.role, t, false);
   }
@@ -2272,8 +2333,8 @@ export class Viewer {
     e.preventDefault();
     const pl = this.placing;
     if (!pl) return;
-    if (e.pointerType === "touch" && now() - this.lastPen < PALM_MS) return;
-    if (e.pointerType === "pen") this.lastPen = now();
+    if (e.pointerType === "touch" && now() - penSeen.last < PALM_MS) return;
+    if (e.pointerType === "pen") penSeen.last = now();
     const target = pl.el, h = e.target.dataset?.h || null;
     try { target.setPointerCapture(e.pointerId); } catch {}
     target.classList.add("dragging");

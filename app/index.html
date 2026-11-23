@@ -24,7 +24,7 @@
         <button class="btn icon-btn tool has-menu" data-tool="box" title="Shapes (B): box, line, arrow, cloud, callout, text. Tap again to choose."></button>
         <button class="btn icon-btn tool" data-tool="sign" title="Signature (S): add your signature, then drag it into place"></button>
         <button class="btn icon-btn tool" data-tool="eraser" title="Eraser (E)"></button>
-        <button class="btn icon-btn tool" data-tool="snip" title="Snip (C): drag a box, or draw around something, to copy it as a picture; Ctrl+V pastes it at the same size"></button>
+        <button class="btn icon-btn tool" data-tool="snip" title="Snip (C): drag a box, or draw around something, to copy it as a picture; then tap where it should go (or Ctrl+V)"></button>
         <button class="btn icon-btn tool" data-tool="content" title="Edit content (X): drag a box to erase an area of the page; tap a line of text to retype it in the same font"></button>
         <button class="btn icon-btn tool" data-tool="measure" title="Measure distance, path length and area (R)"></button>
       </div>
@@ -51,18 +51,7 @@
     <aside id="sidebar"></aside>
     <div id="resizer" title="Drag to resize"></div>
     <section id="stage">
-      <div id="viewer"></div>
-      <div id="side" hidden>
-        <div class="side-split" title="Drag to resize"></div>
-        <div class="side-head">
-          <span class="side-name"></span><span class="side-page"></span>
-          <div class="seg side-tools"><button class="btn icon-btn" data-tool="hand" title="Pan: drag to move around"></button><button class="btn icon-btn" data-tool="snip" title="Snip: copy an area as a picture"></button></div>
-          <button class="btn icon-btn" data-act="fit" title="Fit width"></button>
-          <button class="btn icon-btn" data-act="swap" title="Swap sides (open this one on the left to edit it)"></button>
-          <button class="btn icon-btn" data-act="close" title="Close"></button>
-        </div>
-        <div id="viewer2"></div>
-      </div>
+      <div id="panes"></div>
       <div id="empty">
         <div class="empty-card">
           <img class="logo" src="logo.png" alt="" width="96" height="96">

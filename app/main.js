@@ -1,6 +1,6 @@
 import { host } from "./host.js";
 import { Engine } from "./engine.js";
-import { Viewer, cssColor } from "./viewer.js";
+import { Viewer, cssColor, penActive } from "./viewer.js";
 import { Sidebar } from "./sidebar.js";
 import { PagesPanel, moveOrder } from "./pages.js";
 import { icon } from "./icons.js";
@@ -68,64 +68,373 @@ const MEASURE_COLORS = ["#ea580c", "#dc2626", "#c026d3", "#1d4ed8", "#16a34a", "
 if (host.platform === "win32") document.documentElement.classList.add("wco");
 // Render workers run in parallel; each holds its own copy of the open PDF, so
 // machines with 8 GB of RAM or less get at most 3 (plus the edit worker).
+// PDFs opened side by side get two each.
 const hc = navigator.hardwareConcurrency || 4;
 const mem = navigator.deviceMemory || 8;
-const engine = new Engine(new URL("./worker.js", import.meta.url), Math.max(2, Math.min(mem <= 8 ? 3 : 4, Math.floor(hc / 3))));
-engine.ready().then(() => engine.setAuthor(host.userName || ""));
+const WORKER = new URL("./worker.js", import.meta.url);
+const MAIN_RENDERERS = Math.max(2, Math.min(mem <= 8 ? 3 : 4, Math.floor(hc / 3)));
+const MAX_PANES = 4;
 
-const state = { path: null, gen: 0, saving: false };
+// ------------------------------------------------------------------ open PDFs
+// Every open PDF is a pane with its own engine, view, file and undo history.
+// Several can sit side by side and they all work the same way: the toolbar,
+// keys, Pages panel, title and Save act on the active one, which is the PDF
+// touched last. `engine`, `viewer`, `state` and `docHist` are always the
+// active pane's; async work that must stay with one pane keeps its own.
+const panes = [];
+let active = null, engine = null, viewer = null, state = null, docHist = null;
+let paneSeq = 0;
+const panesEl = $("#panes");
+const samePath = (a, b) => !!a && !!b && (host.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
 
-const viewer = new Viewer($("#viewer"), engine, {
-  onPage(i, n) {
-    pagesPanel.setCurrent(i);
-    showPagePill(i, n);
-    if (cfg.tool === "measure") updateMeasureBar();
-    rememberView();
-    pokeIdle();
-  },
-  onZoom(scale) {
-    $("#zoom-label").textContent = Math.round((scale * 72 / 96) * 100) + "%";
-    rememberView();
-  },
-  onMeasure: (st) => updateMeasureBar(st),
-  onCalibrate: (page, lengthPt) => calibrateDialog(page, lengthPt),
-  scaleFor: (i) => scaleFor(i),
-  onCopy: (text) => copyText(text),
-  onError: (msg) => toast(msg, "error"),
-  onInfo: (msg) => toast(msg),
-  onSnip: (s) => snipFrom(engine, s),
-  // The installed font matching a PDF font, for retyping a line in it.
-  findFont: async (face) => {
-    const f = host.findFont ? await host.findFont({ name: face.name, bold: face.bold, italic: face.italic }) : null;
-    return f && f.file ? { ...f, url: host.fileUrl(f.file) } : null;
-  },
-  onSignTap: (page, p, hit) => signTap(page, p, hit),
-  onSigned: (sig, rect) => signed(sig, rect),
-  onPlacing: (on) => appEl.classList.toggle("placing", on),
-  onShapeSelect: () => { updateStyleButton(); if (!pop.hidden && popAnchor === $("#btn-style") && cfg.tool === "select") closePopover(); },
-  onHistory(canUndo, canRedo, dirty) {
-    updateUndoButtons();
-    appEl.classList.toggle("dirty", dirty);
-    updateTitle();
-  },
-  // A new edit: page changes that were undone can no longer be redone.
-  onEdit: () => { docHist.redo = []; updateUndoButtons(); },
-});
+function createPane(at = panes.length) {
+  const el = document.createElement("div");
+  el.className = "pane";
+  el.innerHTML = `<div class="pane-head" title="Drag to move this PDF"><span class="pane-grip">${icon("grip")}</span><span class="pane-name"></span><span class="pane-dot" title="Unsaved changes"></span><span class="pane-page"></span>` +
+    `<button class="btn icon-btn" data-act="menu" title="More">${icon("more")}</button><button class="btn icon-btn" data-act="close" title="Close this PDF">${icon("x")}</button></div><div class="pane-view"></div>`;
+  const P = {
+    id: ++paneSeq, el, weight: 1, busy: false,
+    head: el.querySelector(".pane-head"), view: el.querySelector(".pane-view"),
+    state: { path: null, gen: 0, saving: false, mtime: 0 },
+    docHist: { undo: [], redo: [] },
+  };
+  panesEl.appendChild(el);
+  P.engine = new Engine(WORKER, panes.length ? 2 : MAIN_RENDERERS);
+  P.engine.ready().then(() => P.engine.setAuthor(host.userName || "")).catch(() => {});
+  P.viewer = new Viewer(P.view, P.engine, paneCallbacks(P));
+  for (const b of P.viewer.selBar.querySelectorAll("[data-act]")) b.innerHTML = icon(b.dataset.act === "copy" ? "copy" : "highlighter") + `<span>${b.textContent}</span>`;
+  applyStylesTo(P.viewer);
+  P.viewer.setTool(cfg.tool);
+  P.viewer.touchDraws = cfg.touchDraws;
+  P.viewer.wheelZooms = cfg.wheel === "zoom";
+  // Touching a PDF makes it the active one, before the touch does anything
+  // (not a palm resting on it while the pen writes in another one).
+  el.addEventListener("pointerdown", (e) => { if (!(e.pointerType === "touch" && penActive())) activate(P); }, true);
+  P.head.addEventListener("pointerdown", (e) => paneHeadDown(P, e));
+  P.head.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]");
+    if (b?.dataset.act === "close") closePane(P);
+    else if (b?.dataset.act === "menu") paneMenu(P, b);
+  });
+  panes.splice(at, 0, P);
+  layoutPanes();
+  return P;
+}
+
+function paneCallbacks(P) {
+  const on = () => P === active;
+  return {
+    onPage(i, n) {
+      updatePaneHead(P);
+      rememberView(P);
+      if (!on()) return;
+      pagesPanel.setCurrent(i);
+      showPagePill(i, n);
+      if (cfg.tool === "measure") updateMeasureBar();
+      pokeIdle();
+    },
+    onZoom(scale) {
+      rememberView(P);
+      if (on()) $("#zoom-label").textContent = Math.round((scale * 72 / 96) * 100) + "%";
+    },
+    onMeasure: (st) => { if (on()) updateMeasureBar(st); },
+    onCalibrate: (page, lengthPt) => { activate(P); calibrateDialog(page, lengthPt); },
+    scaleFor: (i) => scaleOf(P.state.path, i),
+    onCopy: (text) => copyText(text),
+    onError: (msg) => toast(msg, "error"),
+    onInfo: (msg) => toast(msg),
+    onSnip: (s) => snipFrom(P.engine, s),
+    // The installed font matching a PDF font, for retyping a line in it.
+    findFont: async (face) => {
+      const f = host.findFont ? await host.findFont({ name: face.name, bold: face.bold, italic: face.italic }) : null;
+      return f && f.file ? { ...f, url: host.fileUrl(f.file) } : null;
+    },
+    onSignTap: (page, p, hit) => { activate(P); signTap(page, p, hit); },
+    onSigned: (sig, rect) => signed(sig, rect),
+    onPlacing: (placing) => appEl.classList.toggle("placing", placing),
+    onShapeSelect: () => {
+      if (!on()) return;
+      updateStyleButton();
+      if (!pop.hidden && popAnchor === $("#btn-style") && cfg.tool === "select") closePopover();
+    },
+    onHistory(canUndo, canRedo, dirty) {
+      P.el.classList.toggle("dirty", dirty);
+      if (!on()) return;
+      updateUndoButtons();
+      appEl.classList.toggle("dirty", dirty);
+      updateTitle();
+    },
+    // A new edit: page changes that were undone can no longer be redone.
+    onEdit: () => { P.docHist.redo = []; if (on()) updateUndoButtons(); },
+    // A finger held on the page (or a right-click): the page menu.
+    onHold: (h) => { activate(P); pageHoldMenu(P, h); },
+    // Snip tool: a tap puts the copied picture there.
+    onSnipTap: (page, p) => { activate(P); paste({ at: { page, p } }); },
+  };
+}
+
+// Make P the PDF the toolbar, keys and Pages panel work on.
+function activate(P) {
+  if (!P || P === active || !panes.includes(P)) return;
+  const prev = active;
+  if (prev) {
+    const v = prev.viewer;
+    v.commitEdits();
+    if (v.placing) v.finishPlacing(true);
+    if (v.selectedShape) v.deselectShape();
+    if (v.mdraft || v._calibrating) v.cancelMeasure();
+    prev.el.classList.remove("active");
+  }
+  active = P;
+  ({ engine, viewer, state, docHist } = P);
+  P.el.classList.add("active");
+  syncActive();
+  if (prev) saveSession();
+}
+
+// The toolbar, title, page counter and Pages panel show the active PDF.
+function syncActive() {
+  const P = active;
+  P.el.append(pagePill, mbar);
+  pagesPanel.switchTo(engine, P.id, viewer.doc ? viewer.doc.pages : [], viewer.doc ? viewer.currentPage() : 0);
+  updateUndoButtons();
+  appEl.classList.toggle("dirty", !!viewer.dirty);
+  updateTitle();
+  $("#zoom-label").textContent = viewer.doc ? Math.round((viewer.scale * 72 / 96) * 100) + "%" : "–";
+  if (viewer.doc) showPagePill(viewer.currentPage(), viewer.pageCount);
+  updateMeasureBar();
+  updateStyleButton();
+  sidebar.setCurrent(state.path);
+  if (state.path) cfg.lastFile = state.path;
+  appEl.classList.toggle("no-doc", !state.path && panes.length === 1);
+}
+
+function updatePaneHead(P) {
+  const name = P.state.path ? baseName(P.state.path).replace(/\.pdf$/i, "") : "";
+  const n = P.head.querySelector(".pane-name");
+  n.textContent = name;
+  n.title = P.state.path || "";
+  P.el.classList.toggle("dirty", !!P.viewer.dirty);
+  const v = P.viewer;
+  P.head.querySelector(".pane-page").textContent = v.doc ? pageText(v, v.currentPage(), v.pageCount) : "";
+}
+
+// Side by side, left to right (top to bottom when the window is taller than
+// wide), with a divider between each two to share out the room.
+function layoutPanes() {
+  const kids = [];
+  panes.forEach((P, k) => {
+    if (k) kids.push(P.split ||= makeSplit(P));
+    P.el.style.flex = `${P.weight} 1 0`;
+    kids.push(P.el);
+  });
+  const cur = [...panesEl.children];
+  if (cur.length !== kids.length || cur.some((c, i) => c !== kids[i])) panesEl.replaceChildren(...kids);
+  panesEl.classList.toggle("multi", panes.length > 1);
+  for (const P of panes) P.viewer.setShare(panes.length);
+  paneOrientation();
+}
+function paneOrientation() {
+  const r = $("#stage").getBoundingClientRect();
+  panesEl.classList.toggle("vertical", panes.length > 1 && r.height > r.width * 1.1);
+}
+window.addEventListener("resize", paneOrientation);
+
+// The divider before pane P: drag it to give either neighbour more room.
+function makeSplit(P) {
+  const bar = document.createElement("div");
+  bar.className = "pane-split";
+  bar.title = "Drag to resize";
+  bar.addEventListener("pointerdown", (e) => {
+    const k = panes.indexOf(P);
+    if (k < 1) return;
+    e.preventDefault();
+    const A = panes[k - 1], B = P, vert = panesEl.classList.contains("vertical");
+    const ra = A.el.getBoundingClientRect(), rb = B.el.getBoundingClientRect();
+    const start = vert ? ra.top : ra.left, total = vert ? rb.bottom - ra.top : rb.right - ra.left;
+    const sum = A.weight + B.weight;
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("active");
+    const move = (ev) => {
+      const f = Math.max(0.15, Math.min(0.85, ((vert ? ev.clientY : ev.clientX) - start) / total));
+      A.weight = sum * f;
+      B.weight = sum - A.weight;
+      A.el.style.flex = `${A.weight} 1 0`;
+      B.el.style.flex = `${B.weight} 1 0`;
+    };
+    const up = () => {
+      bar.classList.remove("active");
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", up);
+      bar.removeEventListener("pointercancel", up);
+      saveSession();
+    };
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", up);
+    bar.addEventListener("pointercancel", up);
+  });
+  return bar;
+}
+
+// Drag a PDF's title bar (finger, pen or mouse) to move it to another place.
+function paneHeadDown(P, e) {
+  if (e.button !== 0 || e.target.closest("button") || panes.length < 2) return;
+  const head = P.head, x0 = e.clientX, y0 = e.clientY;
+  try { head.setPointerCapture(e.pointerId); } catch {}
+  let D = null;
+  const move = (ev) => {
+    if (!D) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 10) return;
+      D = { ghost: document.createElement("div"), mark: document.createElement("div"), to: -1 };
+      D.ghost.className = "pane-ghost";
+      D.ghost.textContent = P.head.querySelector(".pane-name").textContent || "PDF";
+      D.mark.className = "pane-drop";
+      document.body.append(D.ghost, D.mark);
+      P.el.classList.add("moving");
+    }
+    D.ghost.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 12}px)`;
+    const vert = panesEl.classList.contains("vertical"), pos = vert ? ev.clientY : ev.clientX;
+    let to = panes.length;
+    for (let k = 0; k < panes.length; k++) {
+      const r = panes[k].el.getBoundingClientRect();
+      if (pos < (vert ? r.top + r.height / 2 : r.left + r.width / 2)) { to = k; break; }
+    }
+    D.to = to;
+    const ref = panes[Math.min(to, panes.length - 1)].el.getBoundingClientRect(), sr = panesEl.getBoundingClientRect();
+    const edge = to < panes.length ? (vert ? ref.top : ref.left) : (vert ? ref.bottom : ref.right);
+    D.mark.className = "pane-drop" + (vert ? " v" : "");
+    D.mark.style.cssText = vert ? `left:${sr.left}px;width:${sr.width}px;top:${edge - 2}px` : `top:${sr.top}px;height:${sr.height}px;left:${edge - 2}px`;
+  };
+  const up = (ev) => {
+    head.removeEventListener("pointermove", move);
+    head.removeEventListener("pointerup", up);
+    head.removeEventListener("pointercancel", up);
+    if (!D) return;
+    D.ghost.remove();
+    D.mark.remove();
+    P.el.classList.remove("moving");
+    if (ev.type === "pointerup") movePane(P, D.to);
+  };
+  head.addEventListener("pointermove", move);
+  head.addEventListener("pointerup", up);
+  head.addEventListener("pointercancel", up);
+}
+
+// Put pane P before position `to` (panes.length: at the end).
+function movePane(P, to) {
+  const k = panes.indexOf(P);
+  if (k < 0 || to === k || to === k + 1) return;
+  panes.splice(k, 1);
+  panes.splice(to > k ? to - 1 : to, 0, P);
+  layoutPanes();
+  saveSession();
+}
+
+function paneMenu(P, anchor) {
+  const k = panes.indexOf(P), vert = panesEl.classList.contains("vertical");
+  showMenu(anchor, [
+    { label: "Open another PDF here…", icon: "openFile", run: async () => { const p = await host.pickFile(); if (p) { activate(P); openFile(p); } } },
+    { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => { activate(P); openBeside(null); }, disabled: panes.length >= MAX_PANES },
+    "-",
+    { label: vert ? "Move up" : "Move left", icon: vert ? "moveUp" : "moveLeft", run: () => movePane(P, k - 1), disabled: k === 0 },
+    { label: vert ? "Move down" : "Move right", icon: vert ? "moveDown" : "moveRight", run: () => movePane(P, k + 2), disabled: k === panes.length - 1 },
+    "-",
+    { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(P) },
+  ]);
+}
+
+// Close a PDF (asking to save first). Side by side, its pane goes and the
+// others share the room; the last one stays, empty.
+async function closePane(P = active) {
+  if (!P || !panes.includes(P)) return;
+  if (!(await confirmDiscard(P))) return;
+  storeView(P);
+  if (panes.length === 1) { closeDocument(P); saveSession(); return; }
+  removePane(P);
+}
+
+function removePane(P) {
+  const k = panes.indexOf(P);
+  if (k < 0) return;
+  panes.splice(k, 1);
+  P.state.gen++;
+  clearTimeout(P.viewTimer);
+  P.viewer.destroy();
+  P.engine.destroy();
+  P.el.remove();
+  P.split?.remove();
+  if (active === P) { active = null; activate(panes[Math.min(k, panes.length - 1)]); }
+  pagesPanel.forget(P.id);
+  layoutPanes();
+  saveSession();
+}
+
+function closeDocument(P) {
+  P.state.gen++;
+  P.viewer.close();
+  P.engine.close();
+  P.state.path = null;
+  P.docHist.undo = []; P.docHist.redo = [];
+  updatePaneHead(P);
+  if (P !== active) return;
+  pagesPanel.clear();
+  $("#empty-msg").textContent = cfg.folder ? "Pick a PDF from the list on the left." : "Open a folder to see every PDF inside it, including subfolders.";
+  syncActive();
+}
+
+// Open a PDF next to the active one (or in it, if it's empty).
+async function openBeside(path) {
+  closePopover();
+  path = path || (await host.pickFile());
+  if (!path) return;
+  const open = panes.find((Q) => samePath(Q.state.path, path));
+  if (open) { activate(open); toast(`“${baseName(path)}” is already open`); return; }
+  if (!state.path) { openFile(path); return; }
+  if (panes.length >= MAX_PANES) { toast(`Up to ${MAX_PANES} PDFs side by side: close one first (×)`, "error"); return; }
+  const P = createPane(panes.indexOf(active) + 1);
+  activate(P);
+  await openIn(P, path);
+}
+
+function cyclePane(dir) {
+  if (panes.length < 2) return;
+  activate(panes[(panes.indexOf(active) + dir + panes.length) % panes.length]);
+}
+
+const paneAt = (x, y) => panes.find((Q) => { const r = Q.el.getBoundingClientRect(); return x >= r.left && x < r.right && y >= r.top && y < r.bottom; });
+
+// The open PDFs, for the next start.
+let restoring = false;
+function saveSession() {
+  if (restoring) return;
+  const open = panes.filter((Q) => Q.state.path);
+  cfg.openFiles = open.map((Q) => Q.state.path);
+  cfg.paneWeights = open.map((Q) => Math.round(Q.weight * 1000) / 1000);
+  cfg.activeFile = state?.path || null;
+  if (state?.path) cfg.lastFile = state.path;
+  saveCfg();
+}
+
+{
+  const first = createPane();
+  active = first;
+  ({ engine, viewer, state, docHist } = first);
+  first.el.classList.add("active");
+}
 
 // Undo/redo of page changes (delete, add, move...): the whole document as it
 // was before each one. Annotation edits made since then are undone first.
-const docHist = { undo: [], redo: [] };
 function updateUndoButtons() {
   $("#btn-undo").disabled = !(viewer.canUndo || docHist.undo.length);
   $("#btn-redo").disabled = !(viewer.canRedo || docHist.redo.length);
 }
 function undo() {
   if (viewer.canUndo) viewer.undo();
-  else if (docHist.undo.length) restoreDoc(docHist.undo, docHist.redo, "Page change undone");
+  else if (docHist.undo.length) restoreDoc(active, docHist.undo, docHist.redo, "Page change undone");
 }
 function redo() {
   if (viewer.canRedo) viewer.redo();
-  else if (docHist.redo.length) restoreDoc(docHist.redo, docHist.undo, "Page change redone");
+  else if (docHist.redo.length) restoreDoc(active, docHist.redo, docHist.undo, "Page change redone");
 }
 
 const pagesPanel = new PagesPanel($("#pages"), engine, {
@@ -138,8 +447,14 @@ const pagesPanel = new PagesPanel($("#pages"), engine, {
     label, icon: cfg.pageLabels === k ? "check" : null, run: () => setPageLabels(k),
   }))),
   onClose: () => togglePages(false),
+  // Pages dragged out of the panel onto another open PDF are copied there.
+  onDragOut: (x, y) => {
+    const T = x == null ? null : panes.find((Q) => Q !== active && Q.state.path && Q === paneAt(x, y));
+    for (const Q of panes) Q.el.classList.toggle("drop-target", Q === T);
+    return T ? { pane: T } : null;
+  },
+  onDropOut: (list, out) => copyPagesTo(active, list, out.pane),
 });
-
 const sidebar = new Sidebar($("#sidebar"), {
   onOpen: (p) => openFile(p),
   onPickFolder: () => pickFolder(),
@@ -164,7 +479,7 @@ setIcon("#btn-more", "more");
 setIcon("#btn-touch", "touch");
 $("#empty-open").innerHTML = icon("folderOpen") + " Open folder";
 const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", pen: "pen", box: "square", eraser: "eraser", measure: "ruler", sign: "signature", content: "replaceText", snip: "scissors" };
-const SNIP_HINT = "Drag a box, or draw around something, to copy it as a picture · Ctrl+V pastes it";
+const SNIP_HINT = "Drag a box, or draw around something, to copy it as a picture · then tap where it should go";
 function updateToolIcons() {
   for (const b of document.querySelectorAll(".tool")) {
     const t = b.dataset.tool;
@@ -189,9 +504,10 @@ function updateStyleButton() {
   if (st) sb.querySelector(".swatch-dot").style.background = st.color;
 }
 
+// Tools are the same for every open PDF.
 function setTool(t) {
   cfg.tool = t;
-  viewer.setTool(t);
+  for (const P of panes) P.viewer.setTool(t);
   for (const b of document.querySelectorAll(".tool")) b.classList.toggle("active", b.dataset.tool === t);
   updateStyleButton();
   appEl.classList.toggle("measuring", t === "measure");
@@ -201,18 +517,20 @@ function setTool(t) {
 }
 
 function applyStyles() {
-  for (const k of ["pen", "highlight", "box"]) viewer.setStyle(k, { color: hexToRgb(cfg.styles[k].color), width: cfg.styles[k].width });
-  viewer.setStyle("pen", { pressure: cfg.styles.pen.pressure !== false });
-  viewer.setMeasureStyle({ color: hexToRgb(cfg.measure.color), dp: cfg.measure.dp });
-  viewer.measureMode = cfg.measure.mode;
-  viewer.setShape(cfg.shape);
-  viewer.setTextStyle(cfg.textStyle);
+  for (const P of panes) applyStylesTo(P.viewer);
+}
+function applyStylesTo(v) {
+  for (const k of ["pen", "highlight", "box"]) v.setStyle(k, { color: hexToRgb(cfg.styles[k].color), width: cfg.styles[k].width });
+  v.setStyle("pen", { pressure: cfg.styles.pen.pressure !== false });
+  v.setMeasureStyle({ color: hexToRgb(cfg.measure.color), dp: cfg.measure.dp });
+  v.measureMode = cfg.measure.mode;
+  v.setShape(cfg.shape);
+  v.setTextStyle(cfg.textStyle);
 }
 
 function setWheel(mode, announce = true) {
   cfg.wheel = mode === "zoom" ? "zoom" : "scroll";
-  viewer.wheelZooms = cfg.wheel === "zoom";
-  if (side.viewer) side.viewer.wheelZooms = viewer.wheelZooms;
+  for (const P of panes) P.viewer.wheelZooms = cfg.wheel === "zoom";
   saveCfg();
   if (announce) toast(cfg.wheel === "zoom" ? "Mouse wheel zooms · Shift+wheel scrolls" : "Mouse wheel scrolls · Ctrl+wheel zooms");
 }
@@ -243,7 +561,7 @@ async function copyText(text) {
 
 function setTouchDraws(on) {
   cfg.touchDraws = on;
-  viewer.touchDraws = on;
+  for (const P of panes) P.viewer.touchDraws = on;
   $("#btn-touch").classList.toggle("on", on);
   $("#btn-touch").title = on
     ? "Finger draws: ON — one finger uses the tool, two fingers pan/zoom (T)"
@@ -309,9 +627,8 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   { label: "Insert pages from another PDF…", icon: "openFile", key: keyOf("pages.insert"), run: () => insertPagesDialog(null), disabled: !state.path },
   { label: "Merge all PDFs in the folder…", icon: "merge", key: keyOf("file.mergeFolder"), run: () => mergeFolder(), disabled: !cfg.folder },
   "-",
-  { label: "Open a PDF side by side…", icon: "pages", key: keyOf("view.side"), run: () => openSide(null) },
-  side.path && { label: "Swap sides", icon: "swap", key: keyOf("view.sideSwap"), run: () => swapSides() },
-  side.path && { label: "Close side by side", icon: "x", key: keyOf("view.sideClose"), run: () => closeSide() },
+  { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: panes.length >= MAX_PANES },
+  (panes.length > 1 || state.path) && { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(active) },
   "-",
   { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
   { label: "Paste picture", icon: "clipboard", key: keyOf("edit.paste"), run: () => paste({ center: true }), disabled: !state.path },
@@ -503,9 +820,10 @@ async function showHelp() {
     ["Shapes tool ▾", "Box, line, arrow, cloud, callout or text; it always draws, even on top of other markups"],
     ["Typing in a text box", "Enter finishes · Shift+Enter starts a new line · Esc cancels"],
     ["Edit content tool", "Drag a box to erase an area · tap a line of text to retype it (same font, size and colour); tap it again to change it"],
-    ["Side by side", "Right-click a PDF in the list › Open side by side (or Ctrl+Shift+O) · drag the divider · ⇄ swaps · the keys move whichever PDF you touched last"],
-    ["Snip tool (C)", "Drag a box, or draw around something, to copy it as a picture · Ctrl+V pastes it at the same size, then drag it or its corners"],
-    ["Pages panel", "Click a page to go to it · drag pages to reorder (mouse or pen) · right-click (or press and hold) to add, copy in, duplicate, rotate or delete"],
+    ["Side by side", "Right-click (or press and hold) a PDF in the list › Open side by side (Ctrl+Shift+O) · every PDF works the same; the one you touched last is the one the toolbar and keys use · drag a title bar to move a PDF, the bar between them to resize · × closes it"],
+    ["Snip tool (C)", "Drag a box, or draw around something, to copy it as a picture · then tap where it should go (or Ctrl+V) · it pastes at the same size; drag it or its corners"],
+    ["Press and hold the page (or right-click)", "Paste picture here · Snip · Open a PDF side by side · Close this PDF"],
+    ["Pages panel", "Click a page to go to it · drag pages to reorder (with a finger: drag the grip, or press and hold) · drop them on another open PDF to copy them there · right-click (or press and hold) to add, copy in, duplicate, rotate or delete"],
     ["File list: Ctrl+click / Shift+click", "Select several PDFs, then right-click › Merge · right-click a folder › Merge all PDFs in this folder"],
     ["Callout", "Drag from the spot you're marking to where the text goes, then type"],
     ["Signature tool", "Pick a signature, drag it into place, Place; tap a placed one to move, resize or delete it"],
@@ -531,8 +849,9 @@ async function showHelp() {
 // ------------------------------------------------------------------ measuring
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-function scaleFor(i) {
-  const ds = state.path && cfg.scales[state.path];
+function scaleFor(i) { return scaleOf(state.path, i); }
+function scaleOf(path, i) {
+  const ds = path && cfg.scales[path];
   return (ds && ((ds.pages && ds.pages[i]) || ds.all)) || { ...DEFAULT_SCALE, unit: cfg.measure.unit || "mm" };
 }
 
@@ -543,6 +862,7 @@ function scaleText(sc) {
 
 // scope: "all" or a page index.
 async function setScale(scope, sc) {
+  const { viewer, state } = active;
   if (!state.path) return;
   const clean = { mPerPt: sc.mPerPt, unit: sc.unit, label: sc.label };
   const ds = (cfg.scales[state.path] ||= { all: null, pages: {} });
@@ -747,7 +1067,6 @@ $("#mb-scale").onclick = () => scaleDialog();
 $("#mb-back").onclick = () => viewer.measureBack();
 $("#mb-done").onclick = () => viewer.finishMeasure();
 $("#mb-cancel").onclick = () => viewer.cancelMeasure();
-for (const b of viewer.selBar.querySelectorAll("[data-act]")) b.innerHTML = icon(b.dataset.act === "copy" ? "copy" : "highlighter") + `<span>${b.textContent}</span>`;
 
 // ------------------------------------------------------------------ signatures
 // "My signatures" live in signatures.json (PNG data URLs, most recently used
@@ -959,49 +1278,65 @@ function updateTitle() {
   const name = state.path ? baseName(state.path).replace(/\.pdf$/i, "") : "Eagles PDF viewer";
   $("#title-text").textContent = name;
   document.title = (viewer.dirty ? "• " : "") + (state.path ? name + " — Eagles PDF viewer" : "Eagles PDF viewer");
+  updatePaneHead(active);
 }
 
-let viewTimer = 0;
-function rememberView() {
-  if (!state.path) return;
-  clearTimeout(viewTimer);
-  viewTimer = setTimeout(() => {
-    const v = viewer.viewState();
-    if (!v || !state.path) return;
-    delete cfg.files[state.path];
-    cfg.files[state.path] = v;
-    const keys = Object.keys(cfg.files);
-    if (keys.length > 300) for (const k of keys.slice(0, keys.length - 300)) delete cfg.files[k];
-    saveCfg();
-  }, 400);
+// Where you were in each file, for next time.
+function rememberView(P = active) {
+  if (!P.state.path) return;
+  clearTimeout(P.viewTimer);
+  P.viewTimer = setTimeout(() => storeView(P), 400);
+}
+function storeView(P) {
+  clearTimeout(P.viewTimer);
+  const v = P.viewer.viewState(), path = P.state.path;
+  if (!v || !path) return;
+  delete cfg.files[path];
+  cfg.files[path] = v;
+  const keys = Object.keys(cfg.files);
+  if (keys.length > 300) for (const k of keys.slice(0, keys.length - 300)) delete cfg.files[k];
+  saveCfg();
 }
 
-async function confirmDiscard() {
+async function confirmDiscard(P = active) {
+  const { viewer, state } = P;
   viewer.commitEdits();
   if (!viewer.dirty) return true;
+  activate(P);
   const r = await dialog({
     title: "Save changes?",
     message: `“${baseName(state.path)}” has changes that aren't saved yet.`,
     buttons: [{ id: "cancel", label: "Cancel" }, { id: "discard", label: "Don't save" }, { id: "save", label: "Save", primary: true }],
   });
-  if (r === "save") { await save(); return !viewer.dirty; }
+  if (r === "save") { await save({}, P); return !viewer.dirty; }
   return r === "discard";
 }
 
+// Open a PDF in the active pane; if it's already open side by side, go to it.
 async function openFile(path, { force = false } = {}) {
-  if (!path) return;
-  if (path === state.path && !force) { if (narrow()) toggleSidebar(false); return; }
-  if (!(await confirmDiscard())) return;
+  if (!path) return false;
+  const other = panes.find((Q) => Q !== active && samePath(Q.state.path, path));
+  if (other) { activate(other); if (narrow()) toggleSidebar(false); return true; }
+  return openIn(active, path, { force });
+}
+
+async function openIn(P, path, { force = false } = {}) {
+  const { engine, viewer, state, docHist } = P;
+  if (path === state.path && !force) { if (narrow()) toggleSidebar(false); return true; }
+  if (!(await confirmDiscard(P))) return false;
   closePopover();
+  storeView(P);
   const gen = ++state.gen;
   viewer.close();
   engine.close();
   state.path = path;
-  cfg.lastFile = path;
-  saveCfg();
-  sidebar.setCurrent(path);
-  appEl.classList.remove("no-doc");
-  updateTitle();
+  updatePaneHead(P);
+  if (P === active) {
+    cfg.lastFile = path;
+    sidebar.setCurrent(path);
+    appEl.classList.remove("no-doc");
+    updateTitle();
+  }
   const spin = setTimeout(() => appEl.classList.add("loading"), 120);
   try {
     let st = null;
@@ -1016,27 +1351,43 @@ async function openFile(path, { force = false } = {}) {
       if (pw == null || pw === "cancel") throw new Error("cancelled");
       res = await engine.open(url, pw, st?.size || 0);
     }
-    if (gen !== state.gen) return;
+    if (gen !== state.gen) return false;
     if (!res.pages.length) throw new Error("this PDF has no pages");
     viewer.open(gen, res.pages, cfg.files[path]);
     viewer.setTool(cfg.tool);
     docHist.undo = []; docHist.redo = [];
-    pagesPanel.setDocument(res.pages, viewer.currentPage());
-    updateUndoButtons();
-    updateMeasureBar();
-    $("#zoom-label").textContent = Math.round((viewer.scale * 72 / 96) * 100) + "%";
+    updatePaneHead(P);
+    if (P === active) {
+      pagesPanel.setDocument(viewer.doc.pages, viewer.currentPage());
+      updateUndoButtons();
+      updateMeasureBar();
+      $("#zoom-label").textContent = Math.round((viewer.scale * 72 / 96) * 100) + "%";
+    } else pagesPanel.forget(P.id);
     if (narrow()) toggleSidebar(false);
+    saveSession();
+    return true;
   } catch (err) {
-    if (gen !== state.gen) return;
+    if (gen !== state.gen) return false;
     state.path = null;
     viewer.close();
-    pagesPanel.clear();
-    appEl.classList.add("no-doc");
-    $("#empty-msg").textContent = err.message === "cancelled" ? "Pick a PDF from the list." : `Couldn't open “${baseName(path)}”: ${err.message}`;
-    updateTitle();
+    updatePaneHead(P);
+    // Side by side, a PDF that couldn't open doesn't keep an empty pane.
+    if (panes.length > 1) {
+      if (err.message !== "cancelled") toast(`Couldn't open “${baseName(path)}”: ${err.message}`, "error");
+      removePane(P);
+      return false;
+    }
+    if (P === active) {
+      pagesPanel.clear();
+      appEl.classList.add("no-doc");
+      $("#empty-msg").textContent = err.message === "cancelled" ? "Pick a PDF from the list." : `Couldn't open “${baseName(path)}”: ${err.message}`;
+      updateTitle();
+    }
+    saveSession();
+    return false;
   } finally {
     clearTimeout(spin);
-    if (gen === state.gen) appEl.classList.remove("loading");
+    if (gen === state.gen || !panes.includes(P)) appEl.classList.remove("loading");
   }
 }
 
@@ -1044,16 +1395,20 @@ async function openFile(path, { force = false } = {}) {
 // The page counter at the bottom: "3 / 12", with the page's name if it has one.
 function showPagePill(i, n) {
   const name = viewer.doc?.pages[i]?.name;
-  const num = `${i + 1} / ${n}`;
-  pagePill.textContent = name && cfg.pageLabels !== "number" ? (cfg.pageLabels === "name" ? name : `${name} · ${num}`) : num;
+  pagePill.textContent = pageText(viewer, i, n);
   pagePill.title = name ? `Page ${i + 1} of ${n}: ${name}` : "Go to page";
+}
+function pageText(v, i, n) {
+  const name = v.doc?.pages[i]?.name;
+  const num = `${i + 1} / ${n}`;
+  return name && cfg.pageLabels !== "number" ? (cfg.pageLabels === "name" ? name : `${name} · ${num}`) : num;
 }
 
 function setPageLabels(mode) {
   cfg.pageLabels = mode;
   pagesPanel.setLabelMode(mode);
   if (viewer.doc) showPagePill(viewer.currentPage(), viewer.pageCount);
-  if (side.viewer?.doc) showSidePage(side.viewer.currentPage(), side.viewer.pageCount);
+  for (const P of panes) updatePaneHead(P);
   saveCfg();
   toast(mode === "number" ? "Showing page numbers" : mode === "name" ? "Showing page names (numbers where a page has no name)" : "Showing page numbers and names");
 }
@@ -1062,7 +1417,6 @@ function setPageLabels(mode) {
 const PAPER = [["A4", 210, 297, "mm"], ["A3", 297, 420, "mm"], ["A5", 148, 210, "mm"], ["Letter", 8.5, 11, "in"], ["Legal", 8.5, 14, "in"], ["Tabloid", 11, 17, "in"]];
 const pageWord = (n) => (n === 1 ? "1 page" : `${n} pages`);
 const range = (a, n) => Array.from({ length: n }, (_, k) => a + k);
-let pagesBusy = false;
 
 function togglePages(force) {
   cfg.pagesOpen = force ?? !cfg.pagesOpen;
@@ -1071,23 +1425,28 @@ function togglePages(force) {
   saveCfg();
 }
 
-function showNewPages(pages, focus, keep, select) {
+function showNewPages(P, pages, focus, keep, select) {
+  const { viewer, state } = P;
   const gen = ++state.gen;
   focus = Math.max(0, Math.min(pages.length - 1, focus));
   const same = focus === keep?.page;
   viewer.open(gen, pages, { mode: keep?.mode, scale: keep?.scale, sx: same ? keep?.sx : null, page: focus, offset: same ? keep.offset : 0 });
   viewer.setTool(cfg.tool);
   viewer.markChanged();
-  pagesPanel.setDocument(pages, focus, select);
+  updatePaneHead(P);
+  if (P !== active) { pagesPanel.forget(P.id); return; }
+  pagesPanel.setDocument(viewer.doc.pages, focus, select);
   updateUndoButtons();
   updateTitle();
 }
 
-async function changePages(op, { focus, select, done } = {}) {
-  if (!state.path || pagesBusy || state.saving) return false;
+// A page change in pane P (the active one unless said otherwise).
+async function changePages(op, { focus, select, done } = {}, P = active) {
+  const { viewer, engine, state, docHist } = P;
+  if (!state.path || P.busy || state.saving) return false;
   viewer.commitEdits();
   if (viewer.placing) viewer.finishPlacing(true);
-  pagesBusy = true;
+  P.busy = true;
   const spin = setTimeout(() => appEl.classList.add("loading"), 150);
   const keep = viewer.viewState();
   try {
@@ -1096,7 +1455,7 @@ async function changePages(op, { focus, select, done } = {}) {
     docHist.undo.push({ bytes: r.before });
     if (docHist.undo.length > 20) docHist.undo.shift();
     docHist.redo = [];
-    showNewPages(r.pages, focus ?? keep.page, keep, select);
+    showNewPages(P, r.pages, focus ?? keep.page, keep, select);
     if (done) toast(done);
     return true;
   } catch (err) {
@@ -1105,28 +1464,46 @@ async function changePages(op, { focus, select, done } = {}) {
   } finally {
     clearTimeout(spin);
     appEl.classList.remove("loading");
-    pagesBusy = false;
+    P.busy = false;
   }
 }
 
-async function restoreDoc(from, to, msg) {
-  if (pagesBusy || !state.path) return;
-  pagesBusy = true;
+async function restoreDoc(P, from, to, msg) {
+  const { viewer, engine, state } = P;
+  if (P.busy || !state.path) return;
+  P.busy = true;
   const item = from.pop();
   const keep = viewer.viewState();
   try {
     const r = await engine.restore(item.bytes.slice());
     if (!r) { from.push(item); return; }
     to.push({ bytes: r.before });
-    showNewPages(r.pages, keep.page, keep);
+    showNewPages(P, r.pages, keep.page, keep);
     toast(msg);
   } catch (err) {
     from.push(item);
     toast("Couldn't undo that: " + err.message, "error");
   } finally {
-    pagesBusy = false;
+    P.busy = false;
     updateUndoButtons();
   }
+}
+
+// Pages dragged from the Pages panel onto another open PDF: copied there
+// (with their markups, saved or not), after the page shown in it.
+async function copyPagesTo(S, list, T) {
+  for (const Q of panes) Q.el.classList.remove("drop-target");
+  if (!T || !T.state.path || !list.length || !panes.includes(S)) return;
+  S.viewer.commitEdits();
+  let bytes;
+  try { bytes = await S.engine.snapshot(); } catch (err) { toast("Couldn't copy the pages: " + err.message, "error"); return; }
+  if (!bytes) return;
+  const at = T.viewer.currentPage() + 1;
+  activate(T);
+  await changePages({ kind: "insert", bytes, password: S.engine.password, pages: list, at }, {
+    focus: at, select: range(at, list.length),
+    done: `Copied ${pageWord(list.length)} from “${baseName(S.state.path)}” after page ${at}`,
+  }, T);
 }
 
 const pageCount = () => viewer.pageCount;
@@ -1293,16 +1670,13 @@ async function snipFrom(eng, s) {
   clip = { id, png, w, h };
   // The system clipboard gets the picture (for any app) plus a small html
   // part marking it as ours, so pasting it back here keeps its exact size.
-  let sys = false;
   try {
     await navigator.clipboard.write([new ClipboardItem({
       "image/png": new Blob([png], { type: "image/png" }),
       "text/html": new Blob([`<img data-eagles-snip="${id}" alt="">`], { type: "text/html" }),
     })]);
-    sys = true;
   } catch {}
-  toast(sys ? "Copied · Ctrl+V pastes it at the same size (other apps can paste it too)" : "Copied · Ctrl+V pastes it at the same size",
-    "", { label: "Paste", run: () => paste({ center: true }) });
+  toast("Copied · now tap where it should go (in any open PDF)", "", { label: "Paste", run: () => paste({ center: true }) });
 }
 
 // A lasso: keep only what's inside the shape (the rest is transparent).
@@ -1319,11 +1693,10 @@ async function lassoCut(png, rect, poly, res) {
   return new Uint8Array(await (await c.convertToBlob({ type: "image/png" })).arrayBuffer());
 }
 
-// Paste the snip (or a picture copied in another app) where the pointer is,
-// or in the middle of the view (`center`, for the Paste buttons).
-async function paste({ center = false } = {}) {
-  if (!state.path) return;
-  let png = null, w = 0, h = 0, sys = null;
+// What there is to paste: our last snip (at its exact size), or a picture
+// copied in another app (at its usual size on screen, 96 dpi).
+async function clipboardPicture() {
+  let sys = null;
   try {
     for (const it of await navigator.clipboard.read()) {
       if (!it.types.includes("image/png")) continue;
@@ -1333,155 +1706,40 @@ async function paste({ center = false } = {}) {
     }
   } catch {}
   if (sys && !(clip && sys.id === clip.id)) {
-    // A picture from another app: its usual size on screen (96 dpi).
     const bm = await createImageBitmap(sys.blob);
-    png = new Uint8Array(await sys.blob.arrayBuffer()); w = bm.width * 0.75; h = bm.height * 0.75;
+    const pic = { png: new Uint8Array(await sys.blob.arrayBuffer()), w: bm.width * 0.75, h: bm.height * 0.75 };
     bm.close();
-  } else if (clip) {
-    ({ png, w, h } = clip);
+    return pic;
   }
-  if (!png) { toast("Nothing to paste: copy part of a page with the Snip tool (C) first"); return; }
-  const at = viewer.pastePoint(center);
-  if (!at) return;
+  return clip;
+}
+
+// Paste into the active PDF: at `at` ({ page, p }: a tap or a held finger),
+// where the pointer is, or in the middle of the view (`center`).
+async function paste({ center = false, at = null } = {}) {
+  const P = active, { viewer, state } = P;
+  if (!state.path) return;
+  const pic = await clipboardPicture();
+  if (!pic) { toast("Nothing to paste yet: choose Snip (scissors), then drag a box or draw around something"); return; }
+  const pt = at || viewer.pastePoint(center);
+  if (!pt || !viewer.doc) return;
   if (cfg.tool !== "select") setTool("select");
-  const shrunk = viewer.insertPicture(at.page, at.p, png, w, h);
+  const shrunk = viewer.insertPicture(pt.page, pt.p, pic.png, pic.w, pic.h);
   toast(shrunk ? "Pasted, made smaller to fit the page · drag to move, corners to resize" : "Pasted at the same size · drag to move, corners to resize");
 }
 
-// ------------------------------------------------------------------ side by side
-// A second PDF next to the open one (below it when the window is taller than
-// wide), to read and compare: pan, zoom, snip. It has its own engine with two
-// renderers, started when it opens and stopped when it closes.
-const side = { engine: null, viewer: null, path: null, gen: 0, tool: "hand", active: false };
-const sideEl = $("#side");
-for (const b of sideEl.querySelectorAll("[data-tool]")) b.innerHTML = icon(b.dataset.tool === "snip" ? "scissors" : "hand");
-sideEl.querySelector('[data-act="fit"]').innerHTML = icon("fitWidth");
-sideEl.querySelector('[data-act="swap"]').innerHTML = icon("swap");
-sideEl.querySelector('[data-act="close"]').innerHTML = icon("x");
-sideEl.querySelector(".side-head").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  if (b.dataset.tool) setSideTool(b.dataset.tool);
-  else if (b.dataset.act === "fit") side.viewer?.fit("width");
-  else if (b.dataset.act === "swap") swapSides();
-  else if (b.dataset.act === "close") closeSide();
-});
-sideEl.addEventListener("pointerdown", () => { side.active = true; }, true);
-$("#viewer").addEventListener("pointerdown", () => { side.active = false; }, true);
-
-function setSideTool(t) {
-  side.tool = t;
-  side.viewer?.setTool(t);
-  for (const b of sideEl.querySelectorAll("[data-tool]")) b.classList.toggle("active", b.dataset.tool === t);
-  if (t === "snip") toast(SNIP_HINT);
-}
-
-function setSideFrac(f) {
-  cfg.sideFrac = Math.max(0.2, Math.min(0.8, f));
-  appEl.style.setProperty("--side-frac", cfg.sideFrac);
-}
-
-function sideLayout() {
-  if (!side.path) return;
-  const r = $("#stage").getBoundingClientRect();
-  appEl.classList.toggle("split-v", r.height > r.width * 1.1);
-}
-window.addEventListener("resize", sideLayout);
-
-// Drag the divider to give either PDF more room.
-sideEl.querySelector(".side-split").addEventListener("pointerdown", (e) => {
-  const bar = e.currentTarget;
-  bar.setPointerCapture(e.pointerId);
-  const move = (ev) => {
-    const r = $("#stage").getBoundingClientRect();
-    setSideFrac(appEl.classList.contains("split-v") ? (r.bottom - ev.clientY) / r.height : (r.right - ev.clientX) / r.width);
-  };
-  const up = () => { bar.removeEventListener("pointermove", move); bar.removeEventListener("pointerup", up); bar.removeEventListener("pointercancel", up); saveCfg(); };
-  bar.addEventListener("pointermove", move);
-  bar.addEventListener("pointerup", up);
-  bar.addEventListener("pointercancel", up);
-});
-
-function showSidePage(i, n) {
-  const name = side.viewer?.doc?.pages[i]?.name;
-  sideEl.querySelector(".side-page").textContent = name && cfg.pageLabels !== "number" ? (cfg.pageLabels === "name" ? name : `${name} · ${i + 1} / ${n}`) : `${i + 1} / ${n}`;
-}
-
-async function openSide(path) {
-  closePopover();
-  path = path || (await host.pickFile());
-  if (!path) return;
-  if (!side.engine) {
-    side.engine = new Engine(new URL("./worker.js", import.meta.url), 2);
-    side.viewer = new Viewer($("#viewer2"), side.engine, {
-      onPage: (i, n) => showSidePage(i, n),
-      onSnip: (s) => snipFrom(side.engine, s),
-      onCopy: (t) => copyText(t),
-      onError: (m) => toast(m, "error"),
-      onInfo: (m) => toast(m),
-    });
-    side.viewer.setStyle("pen", { pressure: false });
-    side.viewer.wheelZooms = cfg.wheel === "zoom";
-  }
-  const gen = ++side.gen;
-  side.viewer.close();
-  side.engine.close();
-  side.path = path;
-  cfg.sidePath = path;
-  saveCfg();
-  sideEl.hidden = false;
-  appEl.classList.add("split");
-  sideLayout();
-  sideEl.querySelector(".side-name").textContent = baseName(path).replace(/\.pdf$/i, "");
-  sideEl.querySelector(".side-name").title = path;
-  sideEl.querySelector(".side-page").textContent = "";
-  try {
-    let st = null;
-    try { st = await host.stat(path); } catch {}
-    const url = host.fileUrl(path);
-    let res = await side.engine.open(url, null, st?.size || 0);
-    while (res.needsPassword) {
-      const pw = await dialog({ title: "Password required", message: `“${baseName(path)}” is protected. Enter its password:`, input: { type: "password" }, buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Open", primary: true }] });
-      if (pw == null || pw === "cancel") throw new Error("cancelled");
-      res = await side.engine.open(url, pw, st?.size || 0);
-    }
-    if (gen !== side.gen) return;
-    if (!res.pages.length) throw new Error("this PDF has no pages");
-    side.viewer.open(gen, res.pages, { mode: "width" });
-    setSideTool(side.tool === "snip" ? "snip" : "hand");
-    side.active = true;
-  } catch (err) {
-    if (gen !== side.gen) return;
-    if (err.message !== "cancelled") toast(`Couldn't open “${baseName(path)}” side by side: ${err.message}`, "error");
-    closeSide();
-  }
-}
-
-function closeSide() {
-  side.gen++;
-  if (side.engine) {
-    side.viewer.close();
-    side.engine.destroy();
-    // A fresh element for the next one (drops the old view's listeners).
-    const old = $("#viewer2"), fresh = document.createElement("div");
-    fresh.id = "viewer2";
-    old.replaceWith(fresh);
-  }
-  side.engine = side.viewer = side.path = null;
-  side.active = false;
-  cfg.sidePath = null;
-  saveCfg();
-  sideEl.hidden = true;
-  appEl.classList.remove("split", "split-v");
-}
-
-// Swap the two PDFs (the one on the left is the one you edit).
-async function swapSides() {
-  const a = state.path, b = side.path;
-  if (!b) return;
-  if (!a) { closeSide(); openFile(b); return; }
-  await openFile(b);
-  if (state.path === b) openSide(a);
+// A finger held on the page, or a right-click: what you can do there.
+function pageHoldMenu(P, h) {
+  const at = h.page != null ? { page: h.page, p: h.p } : null;
+  const v = P.viewer;
+  showMenu({ x: h.x - 20, y: h.y + 14 }, [
+    { label: "Paste picture here", icon: "clipboard", key: keyOf("edit.paste"), run: () => paste({ at, center: !at }) },
+    { label: "Snip: copy part of a page", icon: "scissors", key: keyOf("tool.snip"), run: () => { setTool("snip"); toast(SNIP_HINT); } },
+    v.hasSelection && { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(v.sel.text) },
+    "-",
+    { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: panes.length >= MAX_PANES },
+    { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(P) },
+  ]);
 }
 
 // ------------------------------------------------------------------ merging
@@ -1497,7 +1755,7 @@ function fileMenu(at, p, isFile, picks) {
   } else if (isFile) {
     showMenu(at, [
       { label: "Open", run: () => openFile(p) },
-      { label: "Open side by side", icon: "pages", run: () => openSide(p) },
+      { label: "Open side by side", icon: "columns", key: keyOf("view.side"), run: () => openBeside(p), disabled: panes.length >= MAX_PANES && !panes.some((Q) => samePath(Q.state.path, p)) },
       { label: "Select for merging", icon: "check", run: () => sidebar.startPicking(p) },
       state.path && { label: "Insert into the open PDF…", icon: "filePlus", run: () => insertPagesDialog(p) },
       "-",
@@ -1586,6 +1844,7 @@ async function mergeFiles(list, defaultPath) {
 // Embed every markup into the pages, so it can no longer be moved, edited or
 // deleted (in this app or any other PDF app). Saved as a copy or over the file.
 async function embedMarkups() {
+  const P = active, { viewer, engine, state } = P;
   if (!state.path || state.saving) return;
   viewer.commitEdits();
   if (viewer.placing) viewer.finishPlacing(true);
@@ -1622,10 +1881,11 @@ async function embedMarkups() {
     $("#btn-save").classList.remove("saving");
   }
   if (failure) await dialog({ title: "Couldn't embed the markups", message: `${failure.message}\n\nThe file may be open in another app or in a read-only folder. Nothing was changed.`, buttons: [{ id: "ok", label: "Close", primary: true }] });
-  if (reopen) { await openFile(reopen, { force: true }); toast("Markups embedded"); }
+  if (reopen) { await openIn(P, reopen, { force: true }); toast("Markups embedded"); }
 }
 
-async function save({ as = false } = {}) {
+async function save({ as = false } = {}, P = active) {
+  const { viewer, engine, state } = P;
   if (!state.path || state.saving) return;
   viewer.commitEdits();
   if (viewer.placing) viewer.finishPlacing(true);
@@ -1658,8 +1918,8 @@ async function save({ as = false } = {}) {
         if (cfg.scales[path] && !cfg.scales[target]) cfg.scales[target] = cfg.scales[path];
         state.path = target;
         state.mtime = (await host.stat(target).catch(() => null))?.mtime || 0;
-        cfg.lastFile = target;
-        sidebar.setCurrent(target);
+        if (P === active) { cfg.lastFile = target; sidebar.setCurrent(target); }
+        saveSession();
         viewer.markSaved(seq);
         if (erase) reopen = target; else toast("Saved as " + baseName(target));
       }
@@ -1684,17 +1944,18 @@ async function save({ as = false } = {}) {
         if (erase) reopen = path; else toast("Saved");
       }
     }
-    updateTitle();
+    updatePaneHead(P);
+    if (P === active) updateTitle();
   } catch (err) {
     failure = err;
   } finally {
     state.saving = false;
     $("#btn-save").classList.remove("saving");
   }
-  if (retryAs) return save({ as: true });
+  if (retryAs) return save({ as: true }, P);
   // Show the pages as saved (erased content gone).
   if (reopen) {
-    await openFile(reopen, { force: true });
+    await openIn(P, reopen, { force: true });
     const parts = ["Saved"];
     if (pend.erase) parts.push(pend.erase === 1 ? "1 area erased" : `${pend.erase} areas erased`);
     if (pend.lines) parts.push(pend.lines === 1 ? "1 line edited" : `${pend.lines} lines edited`);
@@ -1706,7 +1967,7 @@ async function save({ as = false } = {}) {
       message: `${failure.message}\n\nThe file may be open in another app or in a read-only folder.`,
       buttons: [{ id: "cancel", label: "Close" }, { id: "as", label: "Save as…", primary: true }],
     });
-    if (r === "as") await save({ as: true });
+    if (r === "as") await save({ as: true }, P);
   }
 }
 
@@ -1831,10 +2092,10 @@ function placeLastSig() {
   const last = sigLib.find((x) => x.id === cfg.lastSig) || sigLib[0];
   if (last) placeSig(last); else openSignPanel();
 }
-// Keys that move around act on the view used last (the side-by-side one too).
-const nv = () => (side.viewer && side.active && side.path ? side.viewer : viewer);
-const vh = () => nv().vh;
-const wide = () => { const v = nv(); return v.L && v.L.worldW > v.vw; };
+// Keys act on the active PDF (the one touched last).
+const nv = () => viewer;
+const vh = () => viewer.vh;
+const wide = () => viewer.L && viewer.L.worldW > viewer.vw;
 
 const COMMANDS = [
   // File
@@ -1899,9 +2160,12 @@ const COMMANDS = [
   { id: "view.fitPage", group: "View", label: "Fit page", keys: ["Ctrl+9"], run: () => nv().fit("page") },
   { id: "view.actual", group: "View", label: "Actual size (100%)", keys: ["Ctrl+1"], run: () => nv().setZoom(96 / 72) },
   { id: "view.fullscreen", group: "View", label: "Full screen", keys: ["F11"], typing: true, run: () => host.toggleFullscreen() },
-  { id: "view.side", group: "View", label: "Open a PDF side by side…", keys: ["Ctrl+Shift+O"], typing: true, run: () => openSide(null) },
-  { id: "view.sideSwap", group: "View", label: "Swap the side-by-side PDFs", keys: [], when: () => !!side.path, run: () => swapSides() },
-  { id: "view.sideClose", group: "View", label: "Close the side-by-side PDF", keys: [], when: () => !!side.path, run: () => closeSide() },
+  { id: "view.side", group: "View", label: "Open a PDF side by side…", keys: ["Ctrl+Shift+O"], typing: true, run: () => openBeside(null) },
+  { id: "view.closePane", group: "View", label: "Close this PDF", keys: ["Ctrl+W"], typing: true, when: () => !!state.path || panes.length > 1, run: () => closePane(active) },
+  { id: "view.nextPane", group: "View", label: "Go to the next PDF side by side", keys: ["Ctrl+Tab"], typing: true, when: () => panes.length > 1, run: () => cyclePane(1) },
+  { id: "view.prevPane", group: "View", label: "Go to the previous PDF side by side", keys: ["Ctrl+Shift+Tab"], typing: true, when: () => panes.length > 1, run: () => cyclePane(-1) },
+  { id: "view.paneBack", group: "View", label: "Move this PDF left (or up)", keys: [], when: () => panes.indexOf(active) > 0, run: () => movePane(active, panes.indexOf(active) - 1) },
+  { id: "view.paneForward", group: "View", label: "Move this PDF right (or down)", keys: [], when: () => panes.indexOf(active) < panes.length - 1, run: () => movePane(active, panes.indexOf(active) + 2) },
   { id: "view.wheel", group: "View", label: "Switch the mouse wheel between scroll and zoom", keys: [], run: () => setWheel(cfg.wheel === "zoom" ? "scroll" : "zoom") },
   // Navigate
   { id: "nav.down", group: "Navigate", label: "Scroll down", keys: ["ArrowDown"], repeat: true, run: () => nv().scrollBy(0, 60) },
@@ -1964,7 +2228,7 @@ const TITLES = {
   "tool.pen": [".tool[data-tool=pen]", "Pen"],
   "tool.box": [".tool[data-tool=box]", "Shapes: box, line, arrow, cloud, callout, text. Tap again to choose. To move or edit a shape, use Select"],
   "tool.sign": [".tool[data-tool=sign]", "Signature: add your signature, then drag it into place; tap a placed one to move, resize or delete it"],
-  "tool.snip": [".tool[data-tool=snip]", "Snip: drag a box, or draw around something, to copy it as a picture; Ctrl+V pastes it at the same size"],
+  "tool.snip": [".tool[data-tool=snip]", "Snip: drag a box, or draw around something, to copy it as a picture; then tap where it should go (or Ctrl+V) to paste it at the same size"],
   "tool.content": [".tool[data-tool=content]", "Edit content: drag a box to erase an area of the page; tap a line of text to retype it in the same font"],
   "tool.eraser": [".tool[data-tool=eraser]", "Eraser"],
   "tool.measure": [".tool[data-tool=measure]", "Measure distance, path length and area"],
@@ -2092,7 +2356,7 @@ document.addEventListener("drop", async (e) => {
   if (!p) return;
   const st = await host.stat(p).catch(() => null);
   if (st?.isDirectory) { cfg.folder = p; saveCfg(); toggleSidebar(true); loadFolder(p, false); }
-  else if (/\.pdf$/i.test(p)) openFile(p);
+  else if (/\.pdf$/i.test(p)) { activate(paneAt(e.clientX, e.clientY)); openFile(p); }
   else if (IMAGE_EXT.test(p)) prepareSignature(p);
 });
 
@@ -2100,12 +2364,11 @@ document.addEventListener("drop", async (e) => {
 host.onFolderChanged(() => { if (cfg.folder) loadFolder(cfg.folder, false); });
 host.onOpenFile((p) => openFile(p));
 host.onCloseRequest(async () => {
-  if (await confirmDiscard()) {
-    const v = viewer.viewState();
-    if (v && state.path) cfg.files[state.path] = v;
-    await saveCfg(true);
-    host.confirmClose();
-  }
+  for (const P of panes.slice()) if (!(await confirmDiscard(P))) return;
+  for (const P of panes) storeView(P);
+  saveSession();
+  await saveCfg(true);
+  host.confirmClose();
 });
 
 // ------------------------------------------------------------------ start
@@ -2118,22 +2381,50 @@ applyStyles();
 setWheel(cfg.wheel, false);
 setTool(cfg.tool);
 setTouchDraws(cfg.touchDraws);
-viewer.cb.onHistory(false, false, false);
-$("#zoom-label").textContent = "–";
+syncActive();
 
-const startFile = host.initialFile || cfg.lastFile;
 if (host.platform === "web" && new URLSearchParams(location.search).get("folder")) {
   cfg.folder = new URLSearchParams(location.search).get("folder");
 }
 if (cfg.folder) loadFolder(cfg.folder, true);
-if (typeof cfg.sideFrac === "number") setSideFrac(cfg.sideFrac);
-if (cfg.sidePath) host.stat(cfg.sidePath).then((st) => { if (st && !side.path) openSide(cfg.sidePath); }).catch(() => {});
-else sidebar.setRoot(null), sidebar.setTree(null);
-if (startFile) {
-  const st = await host.stat(startFile).catch(() => null);
-  if (st && !st.isDirectory) openFile(startFile);
+else { sidebar.setRoot(null); sidebar.setTree(null); }
+
+// The PDFs that were open side by side last time, or the one Windows asked
+// to open. (1.7 kept a second, read-only PDF on the side: it opens as an
+// ordinary one now.)
+{
+  restoring = true;
+  let list;
+  if (host.initialFile) list = [host.initialFile];
+  else if (Array.isArray(cfg.openFiles)) list = cfg.openFiles;
+  else list = [cfg.lastFile, cfg.sidePath];
+  const weights = !host.initialFile && Array.isArray(cfg.paneWeights) ? cfg.paneWeights : [];
+  delete cfg.sidePath;
+  delete cfg.sideFrac;
+  const files = [];
+  for (const p of list.filter(Boolean)) {
+    if (files.length >= MAX_PANES || files.some((f) => samePath(f, p))) continue;
+    const st = await host.stat(p).catch(() => null);
+    if (st && !st.isDirectory) files.push(p);
+  }
+  const jobs = files.map((p, k) => {
+    const P = k ? createPane() : panes[0];
+    P.weight = weights[k] > 0 ? weights[k] : 1;
+    return [P, p];
+  });
+  layoutPanes();
+  const ai = files.findIndex((p) => samePath(p, cfg.activeFile));
+  if (ai > 0) activate(panes[ai]);
+  Promise.all(jobs.map(([P, p]) => openIn(P, p))).finally(() => { restoring = false; saveSession(); });
+  if (!files.length) {
+    restoring = false;
+    $("#empty-msg").textContent = cfg.folder ? "Pick a PDF from the list on the left." : "Open a folder to see every PDF inside it, including subfolders.";
+  }
 }
-if (!state.path) $("#empty-msg").textContent = cfg.folder ? "Pick a PDF from the list on the left." : "Open a folder to see every PDF inside it, including subfolders.";
 
 // Expose for automated tests.
-window.__inkleaf = { viewer, engine, sidebar, side, state, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib };
+window.__inkleaf = {
+  get viewer() { return viewer; }, get engine() { return engine; }, get state() { return state; }, get active() { return active; },
+  panes, activate, openBeside, closePane, movePane, cyclePane, paste,
+  sidebar, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib,
+};

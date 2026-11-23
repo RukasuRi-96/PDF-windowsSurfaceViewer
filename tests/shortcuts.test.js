@@ -78,7 +78,7 @@ const W = process.env.WORK;
   await page.keyboard.type('vh');
   console.log('typing "vh" in the filter keeps tool:', await tool(), '| filter text:', await page.inputValue('.sb-search input'));
   await page.fill('.sb-search input', '');
-  await page.click('#viewer', { position: { x: 5, y: 5 } });
+  await page.click('.pane.active .pane-view', { position: { x: 5, y: 5 } });
 
   // Shape keys: select a box, Delete removes it, undo; text: Enter edits
   await page.keyboard.press('b');

@@ -1,7 +1,7 @@
 // Page names (labels and bookmarks; number / name / both), the current page
 // highlighted in the Pages panel, press and hold to move a page with a finger,
-// the Snip tool (box and lasso, pasted at the same size, moved, saved), and a
-// second PDF side by side (divider, keys, snip from it, swap, close).
+// and the Snip tool (box and lasso, pasted at the same size, moved, saved;
+// the Paste button). PDFs side by side: panes.test.js.
 const { chromium } = require('playwright');
 const { execFileSync } = require('child_process');
 const W = process.env.WORK;
@@ -136,51 +136,7 @@ const W = process.env.WORK;
   const imgs = execFileSync('pdfimages', ['-list', W + '/lib/Notes.pdf']).toString().split('\n').filter(l => /^\s*\d+\s+\d+\s+(image|smask)/.test(l)).length;
   console.log('saved and reopened: pictures', await page.evaluate(() => window.__inkleaf.viewer.doc.annots.get(0).filter(a => a.shape?.k === 'image').length), '· images in the file (with masks):', imgs);
 
-  // ---- 4. Side by side
-  await page.click('.sb-row:has-text("Drawing set")', { button: 'right' });
-  await page.click('.menu button:has-text("Open side by side")');
-  const s0 = Date.now();
-  await page.waitForFunction(() => document.querySelector('#viewer2 .page.ready'), null, { timeout: 10000 });
-  const sideMs = Date.now() - s0;
-  const geo = await page.evaluate(() => ({ main: Math.round(document.querySelector('#viewer').getBoundingClientRect().width), side: Math.round(document.querySelector('#viewer2').getBoundingClientRect().width), name: document.querySelector('.side-name').textContent, pg: document.querySelector('.side-page').textContent }));
-  console.log('side by side: shown in', sideMs < 2500 ? '< 2.5 s' : sideMs + ' ms', '·', JSON.stringify(geo));
-  // the main PDF still works as before
-  console.log('main view still on Notes and editable:', await page.evaluate(() => window.__inkleaf.state.path.endsWith('Notes.pdf')));
-  // drag the divider
-  const sp = await page.locator('.side-split').boundingBox();
-  await page.mouse.move(sp.x + sp.width / 2, sp.y + 300); await page.mouse.down(); await page.mouse.move(sp.x + sp.width / 2 - 200, sp.y + 300, { steps: 6 }); await page.mouse.up();
-  await page.waitForTimeout(400);
-  console.log('divider dragged: side view now', await page.evaluate(() => Math.round(document.querySelector('#viewer2').getBoundingClientRect().width)), 'px wide');
-  // pan it by dragging (hand), and keys move the one used last
-  const v2 = await page.locator('#viewer2').boundingBox();
-  const sy0 = await page.evaluate(() => window.__inkleaf.side.viewer.sy);
-  await page.mouse.move(v2.x + v2.width / 2, v2.y + 400); await page.mouse.down(); await page.mouse.move(v2.x + v2.width / 2, v2.y + 150, { steps: 8 }); await page.mouse.up();
-  await page.waitForTimeout(300);
-  const sy1 = await page.evaluate(() => window.__inkleaf.side.viewer.sy);
-  const mainSy = await page.evaluate(`${V}.sy`);
-  await page.keyboard.press('End');
-  await page.waitForTimeout(600);
-  console.log('drag pans the side PDF:', sy1 > sy0, '· End key scrolls it to the end:', await page.evaluate(() => { const v = window.__inkleaf.side.viewer; return v.sy >= v.L.worldH - v.vh - 2; }), '· main PDF did not move:', (await page.evaluate(`${V}.sy`)) === mainSy);
-  // snip from the side PDF, paste into the main one
-  await page.click('.side-tools [data-tool=snip]');
-  const v3 = await page.locator('#viewer2').boundingBox();
-  await H.pen(H.line(v3.x + 40, v3.y + 120, v3.x + 220, v3.y + 200, 10));
-  await page.waitForTimeout(700);
-  await page.mouse.move(600, 500);
-  const before = await page.evaluate(() => window.__inkleaf.viewer.doc.annots.get(0).length);
-  await page.keyboard.press('Control+v');
-  await page.waitForTimeout(600);
-  console.log('snip in the side PDF, paste in the main one:', (await page.evaluate(() => window.__inkleaf.viewer.doc.annots.get(0).length)) === before + 1);
-  // swap, then close
-  await page.click('.side-head [data-act=swap]');
-  await page.waitForTimeout(400);
-  if (await page.isVisible('.dialog')) await page.click('.dialog .btn:has-text("Don\'t save")');
-  await page.waitForFunction(() => window.__inkleaf.state.path.endsWith('Drawing set.pdf') && document.querySelector('.side-name').textContent === 'Notes' && document.querySelector('#viewer2 .page.ready'), null, { timeout: 10000 });
-  console.log('swap: main', await page.evaluate(() => window.__inkleaf.state.path.split('/').pop()), '· side', await page.textContent('.side-name'));
-  await page.click('.side-head [data-act=close]');
-  await page.waitForTimeout(300);
-  console.log('close: side hidden', await page.isHidden('#side'), '· its engine stopped', await page.evaluate(() => window.__inkleaf.side.engine === null), '· main full width', await page.evaluate(() => Math.round(document.querySelector('#viewer').getBoundingClientRect().width)));
-  await page.screenshot({ path: W + '/snip-side.png' });
+  await page.screenshot({ path: W + '/snip.png' });
   console.log(errs.length ? errs.join('\n') : 'no errors');
   await browser.close();
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

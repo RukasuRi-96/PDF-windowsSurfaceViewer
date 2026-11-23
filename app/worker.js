@@ -873,10 +873,16 @@ let docPassword = null;
 // Each change is made to the open document, which is then rewritten in
 // memory (dropping removed pages' content) and reopened; the renderers reopen
 // the same bytes. The state before the change comes back for undo.
-async function loadSource(url, password) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Cannot read file (${r.status})`);
-  const src = mupdf.Document.openDocument(new Uint8Array(await r.arrayBuffer()), "application/pdf");
+// The PDF pages are copied from: a file, or (`bytes`) another open PDF as it
+// is now, with its unsaved markups.
+async function loadSource(url, password, bytes) {
+  let data = bytes;
+  if (!data) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`Cannot read file (${r.status})`);
+    data = new Uint8Array(await r.arrayBuffer());
+  }
+  const src = mupdf.Document.openDocument(data, "application/pdf");
   if (src.needsPassword() && !(password && src.authenticatePassword(password))) {
     src.destroy();
     const e = new Error("This PDF is password protected");
@@ -950,7 +956,7 @@ async function pageOp(op) {
       break;
     }
     case "insert": {
-      const src = await loadSource(op.url, op.password);
+      const src = await loadSource(op.url, op.password, op.bytes);
       try {
         const m = src.countPages();
         const list = (op.pages && op.pages.length ? op.pages : [...Array(m).keys()]).filter((i) => i >= 0 && i < m);
@@ -1040,6 +1046,11 @@ const handlers = {
     return structureResult(before);
   },
   // Number of pages in another PDF (to choose pages to copy from it).
+  // The open document as it is now (markups included), to copy pages from.
+  snapshot() {
+    const b = snapshot("");
+    return { result: b, transfer: [b.buffer] };
+  },
   async countPagesOf({ url, password }) {
     const src = await loadSource(url, password);
     try { return { result: src.countPages() }; } finally { src.destroy(); }
