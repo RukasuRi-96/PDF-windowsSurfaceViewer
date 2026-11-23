@@ -46,7 +46,7 @@ MOUSE
 
 TOOLS (tap the active tool again for colors and thickness)
   Select (V)  Pan (H)  Highlight (M)  Pen (P)  Shapes (B)  Signature (S)
-  Eraser (E)  Edit content (X)  Measure (R)
+  Eraser (E)  Snip (C)  Edit content (X)  Measure (R)
   Highlight snaps to text; where there is no text it becomes a marker.
   Drawing tools always draw, even on top of other markups.
 
@@ -95,7 +95,28 @@ PAGES (button at the top right, or Ctrl+Shift+P)
   button (or right-click a page; with a finger, press and hold) adds a
   blank page (A4, A3, A5, Letter, Legal, Tabloid, portrait or landscape)
   or pages from another PDF, and duplicates, rotates or moves pages.
-  Drag pages with the mouse or pen to reorder them. Ctrl+Z undoes.
+  Drag pages with the mouse or pen to reorder them; with a finger,
+  press and hold a page until it lifts, then drag it. Ctrl+Z undoes.
+  The page you are reading is highlighted. If the PDF names its pages
+  (like A-101) or has bookmarks, the names are shown too: the tag button
+  at the top of the panel switches between numbers, names or both.
+  Ctrl+G (or click the page counter) goes to a page by number or name.
+
+SNIP: COPY PART OF A PAGE AS A PICTURE (C)
+  Drag a box, or draw around something (a lasso), with the pen, mouse
+  or a finger. It is copied as a picture (other apps can paste it too).
+  Ctrl+V pastes it at exactly the same size where the pointer is; or tap
+  "Paste" on the "Copied" message, or More (...) > Paste picture.
+  Drag the picture to move it, drag a corner to resize it (it keeps its
+  proportions), Delete removes it.
+
+SIDE BY SIDE: TWO PDFS AT ONCE
+  Right-click a PDF in the file list (with a finger: press and hold)
+  > "Open side by side", or press Ctrl+Shift+O. Drag the bar between
+  them to resize. Each PDF pans and zooms on its own; the keys move the
+  one you touched last. The scissors button snips from the side PDF so
+  you can paste into yours. The swap button swaps the two (you mark up
+  the main one); X closes the side PDF.
 
 MERGE PDFS
   In the file list, Ctrl+click the PDFs you want (Shift+click for a
@@ -111,10 +132,10 @@ SAVING
   Ctrl+Shift+S = Save as.  Ctrl+Z / Ctrl+Y = undo / redo.
 
 EMBED MARKUPS: More (...) > Embed markups...
-  Makes highlights, drawings, shapes, text and signatures part of the
-  pages, so they can no longer be moved, edited or deleted (in any PDF
-  app). Choose "Save as a copy..." (the open file keeps its editable
-  markups) or "Replace this file".
+  Makes highlights, drawings, shapes, text, signatures and pictures
+  part of the pages, so they can no longer be moved, edited or deleted
+  (in any PDF app). Choose "Save as a copy..." (the open file keeps its
+  editable markups) or "Replace this file".
 
 CHANGE ANY SHORTCUT: More (...) > Keyboard shortcuts (Ctrl+K)
   Search for a command, click "Add shortcut", press the keys you want.

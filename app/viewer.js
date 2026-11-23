@@ -120,7 +120,9 @@ function dotCursor(color, px) {
 }
 
 // Tools a finger uses when "finger draws" is on (otherwise a finger pans).
-const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure", "content"]);
+const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure", "content", "snip"]);
+// Signatures and pasted pictures: images that keep their proportions.
+const isPic = (k) => k === "sig" || k === "image";
 const FONT_CSS = { Helv: "Helvetica, Arial, sans-serif", TiRo: '"Times New Roman", Times, serif', Cour: '"Courier New", Courier, monospace' };
 const round2 = (v) => Math.round(v * 100) / 100;
 // A pen stroke with a width per point (drawn with pressure).
@@ -489,7 +491,15 @@ export class Viewer {
     this._stopInertia();
     const L = this.L;
     const y = L.H[i] <= this.vh ? L.top[i] - (this.vh - L.H[i]) / 2 : L.top[i] - PAD / 2;
-    this.scrollTo(this.sx, y);
+    this.scrollTo(this._xFor(i), y);
+  }
+
+  // Horizontal scroll that shows page i: unchanged if it's in view, else
+  // centred on it (a narrow page next to wide drawings can be off to the side).
+  _xFor(i) {
+    const L = this.L, left = L.left[i], w = L.W[i];
+    if (w <= this.vw) return left >= this.sx && left + w <= this.sx + this.vw ? this.sx : left - (this.vw - w) / 2;
+    return left + w < this.sx + 40 || left > this.sx + this.vw - 40 ? left - PAD : this.sx;
   }
 
   pageStep(dir) {
@@ -596,6 +606,7 @@ export class Viewer {
     const s = this._fitScale(mode, i);
     this._zoomAround(s, this.vw / 2, this.vh / 2, mode);
     if (mode === "page") this.goToPage(i);
+    else this.scrollTo(this._xFor(i), this.sy);
   }
 
   // Transient zoom: a GPU transform on top of the committed layout.
@@ -1029,6 +1040,7 @@ export class Viewer {
 
   _move(e) {
     if (e.pointerType === "pen") this.lastPen = now();
+    if (e.pointerType !== "touch") this._hoverPt = { x: e.clientX, y: e.clientY, t: now() };
     // A hovering pen shows a dot (ink colour and size) instead of a crosshair.
     const pen = e.pointerType === "pen";
     if (pen !== this._penNear) { this._penNear = pen; this.root.classList.toggle("pen-near", pen); }
@@ -1050,6 +1062,7 @@ export class Viewer {
       case "select": this._moveSelect(a, e); break;
       case "measure": this._measureMove(a, e); break;
       case "pickmark": this._movePick(a, e); break;
+      case "snip": this._moveSnip(a, e); break;
     }
   }
 
@@ -1109,6 +1122,7 @@ export class Viewer {
       case "select": this._finishSelect(a, cancel); break;
       case "measure": this._measureUp(a, cancel); break;
       case "pickmark": if (!cancel) this.selectShape(a.page, a.d); break;
+      case "snip": this._finishSnip(a, cancel); break;
       case "pinch": this._ztCommit(this.vw / 2, this.vh / 2); break;
     }
   }
@@ -1238,6 +1252,7 @@ export class Viewer {
     else if (this.tool === "box") this._startBox(base, p);
     // Edit content: drag a box to erase an area; tap text to retype it.
     else if (this.tool === "content") { this._startBox(base, p, "redact"); this.action.tapEdit = true; }
+    else if (this.tool === "snip") this.action = { ...base, kind: "snip", pts: [p], len: 0 };
     else return false;
     return true;
   }
@@ -1245,6 +1260,84 @@ export class Viewer {
   _screenOf(i, pt) {
     const p = this.doc.pages[i], L = this.L;
     return [L.left[i] + (pt[0] - p.x0) * this.scale - this.sx, L.top[i] + (pt[1] - p.y0) * this.scale - this.sy];
+  }
+
+  // ---- snip: copy an area of the page as a picture. A straight drag makes a
+  // box (corner to corner); drawing around something makes a lasso.
+  _snipShape(a) {
+    const p0 = a.pts[0], p1 = a.pts[a.pts.length - 1];
+    const chord = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+    if (a.pts.length < 3 || a.len <= chord * 1.35) return { rect: [Math.min(p0[0], p1[0]), Math.min(p0[1], p1[1]), Math.max(p0[0], p1[0]), Math.max(p0[1], p1[1])], poly: null };
+    const xs = a.pts.map((q) => q[0]), ys = a.pts.map((q) => q[1]);
+    return { rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], poly: a.pts };
+  }
+
+  _moveSnip(a, e) {
+    for (const ev of e.getCoalescedEvents ? e.getCoalescedEvents() : [e]) {
+      const p = this._clampToPage(a.page, this._clientToPage(a.page, ev.clientX, ev.clientY));
+      const lp = a.pts[a.pts.length - 1];
+      const d = Math.hypot(p[0] - lp[0], p[1] - lp[1]);
+      if (d * this.scale < 1.5) continue;
+      a.len += d;
+      a.pts.push(p);
+    }
+    this._drawSnip(a);
+  }
+
+  _drawSnip(a, done = false) {
+    this._clearLive();
+    const c = this.liveCtx, { rect, poly } = this._snipShape(a);
+    c.save();
+    this._liveClipToPage(a.page);
+    c.beginPath();
+    if (poly) poly.forEach((q, k) => { const [x, y] = this._screenOf(a.page, q); if (k) c.lineTo(x, y); else c.moveTo(x, y); });
+    else { const [x0, y0] = this._screenOf(a.page, [rect[0], rect[1]]), [x1, y1] = this._screenOf(a.page, [rect[2], rect[3]]); c.rect(x0, y0, x1 - x0, y1 - y0); }
+    c.closePath();
+    c.fillStyle = done ? "rgba(47,111,237,0.12)" : "rgba(47,111,237,0.06)";
+    c.fill();
+    c.lineWidth = 1.5;
+    c.setLineDash([6, 4]);
+    c.strokeStyle = "#2f6fed";
+    c.stroke();
+    c.restore();
+  }
+
+  _finishSnip(a, cancel) {
+    const { rect, poly } = this._snipShape(a);
+    if (cancel || (rect[2] - rect[0]) * this.scale < 6 || (rect[3] - rect[1]) * this.scale < 6) { this._clearLive(); return; }
+    this._drawSnip(a, true);
+    clearTimeout(this._snipFade);
+    this._snipFade = setTimeout(() => { if (!this.action) this._clearLive(); }, 900);
+    this.cb.onSnip?.({ page: a.page, rect: rect.map(round2), poly: poly && poly.map((q) => [round2(q[0]), round2(q[1])]), zoom: this.scale * this.dpr });
+  }
+
+  // Where a pasted picture goes: under the pointer if it's over a page,
+  // else the middle of the view.
+  pastePoint(center = false) {
+    if (!this.doc) return null;
+    const h = this._hoverPt;
+    if (!center && h && now() - h.t < 15000) {
+      const [wx, wy] = this._toWorld(h.x, h.y);
+      const i = this._hitPage(wx, wy, 0);
+      if (i >= 0) return { page: i, p: this._worldToPage(i, wx, wy) };
+    }
+    const i = this.currentPage(), P = this.doc.pages[i];
+    const [wx, wy] = this._toWorld(this.rect.left + this.vw / 2, this.rect.top + this.vh / 2);
+    const q = this._hitPage(wx, wy, 0) === i ? this._worldToPage(i, wx, wy) : [(P.x0 + P.x1) / 2, (P.y0 + P.y1) / 2];
+    return { page: i, p: q };
+  }
+
+  // Put a picture on page i, centred at p, `w` × `h` points (shrunk to fit
+  // the page if needed); it is selected so it can be moved straight away.
+  insertPicture(i, p, png, w, h) {
+    const P = this.doc.pages[i];
+    const f = Math.min(1, (P.w * 0.96) / w, (P.h * 0.96) / h);
+    w *= f; h *= f;
+    const x0 = clamp(p[0] - w / 2, P.x0, P.x1 - w), y0 = clamp(p[1] - h / 2, P.y0, P.y1 - h);
+    const d = { type: "Stamp", shape: { k: "image" }, rect: [x0, y0, x0 + w, y0 + h].map(round2), png, href: URL.createObjectURL(new Blob([png], { type: "image/png" })), color: [], opacity: 1 };
+    this._commitAdd(i, d);
+    this.selectShape(i, d);
+    return f < 1;
   }
 
   _clearLive() {
@@ -1780,7 +1873,7 @@ export class Viewer {
 
   selectShape(i, d) {
     this.deselectShape();
-    if (this._kindOf(d) === "sig" && !d.href && !d.png) {
+    if (isPic(this._kindOf(d)) && !d.href && !d.png) {
       this.engine.annotImage(i, () => d.id).then((png) => {
         if (!png || d.png) return;
         d.png = png;
@@ -1859,7 +1952,7 @@ export class Viewer {
       const frame = el("div", "ss-frame", S.el);
       if (this._canMove(kind)) frame.dataset.role = "move";
       else frame.classList.add("fixed");
-      const roles = ["box", "cloud", "redact", "sig"].includes(kind) ? ["nw", "ne", "sw", "se"] : kind === "line" || kind === "arrow" ? ["p0", "p1"] : kind === "callout" ? ["tip"] : [];
+      const roles = ["box", "cloud", "redact", "sig", "image"].includes(kind) ? ["nw", "ne", "sw", "se"] : kind === "line" || kind === "arrow" ? ["p0", "p1"] : kind === "callout" ? ["tip"] : [];
       for (const r of roles) { const h = el("div", "ss-h " + r, S.el); h.dataset.role = r; }
       const bar = el("div", "ss-bar", S.el);
       bar.innerHTML = (kind === "text" || kind === "callout" || kind === "retext" ? `<button class="btn" data-act="edit">Edit text</button>` : "") + `<button class="btn" data-act="delete">${kind === "retext" ? "Undo edit" : "Delete"}</button>`;
@@ -1913,7 +2006,7 @@ export class Viewer {
     } else if (role === "tip") {
       const tip = this._clampToPage(S.page, [g0.callout[0][0] + dx, g0.callout[0][1] + dy]);
       g.callout = this._calloutPts(tip, g.rect, g.width || 0, g.size);
-    } else if (kind === "sig") {
+    } else if (isPic(kind)) {
       // A signature keeps its proportions.
       const r = g0.rect, aspect = (r[3] - r[1]) / (r[2] - r[0]);
       const ax = role.includes("w") ? r[2] : r[0], ay = role.includes("n") ? r[3] : r[1];
@@ -2880,7 +2973,7 @@ export class Viewer {
       svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: "rd-line" }, g);
       return g;
     }
-    if (k === "sig" && (d.href || d.png)) {
+    if (isPic(k) && (d.href || d.png)) {
       if (!d.href) d.href = URL.createObjectURL(new Blob([d.png], { type: "image/png" }));
       const [x0, y0, x1, y1] = d.rect;
       return svgEl("image", { class: "shape", href: d.href, x: x0, y: y0, width: x1 - x0, height: y1 - y0, preserveAspectRatio: "none" });
@@ -2913,7 +3006,7 @@ export class Viewer {
 
   // MuPDF's drawing of a just-created shape has arrived: swap it in.
   _annotReady(d) {
-    if (!d.shape || !d.svg || (d.shape.k === "sig" && d.href) || d.shape.k === "redact") return;
+    if (!d.shape || !d.svg || (isPic(d.shape.k) && d.href) || d.shape.k === "redact") return;
     const old = this._nodes.get(d);
     if (!old || !old.parentNode) return;
     const n = this._shapeNode(d);
@@ -2967,7 +3060,7 @@ export class Viewer {
     this._nodes.delete(d);
     this._refreshErased(i);
     // A signature loaded from the file: keep its image so undo can restore it.
-    if (d.shape?.k === "sig" && !d.png) this.engine.annotImage(i, () => d.id).then((png) => { if (png) d.png = png; }).catch(() => {});
+    if (isPic(d.shape?.k) && !d.png) this.engine.annotImage(i, () => d.id).then((png) => { if (png) d.png = png; }).catch(() => {});
     this.engine.deleteAnnot(i, () => d.id);
   }
 

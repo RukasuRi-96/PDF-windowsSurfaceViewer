@@ -1,4 +1,4 @@
-// Real Electron app: select + copy via the clipboard IPC, measure, save, relaunch, erase + embed, pages panel.
+// Real Electron app: select + copy via the clipboard IPC, measure, save, relaunch, erase + embed, pages panel, snip to the system clipboard, side by side.
 const { _electron: electron } = require('playwright');
 const OLD = process.env.WORK, SP = process.env.WORK, R = require('path').join(__dirname, '..');
 const MM = 72 / 25.4;
@@ -87,6 +87,32 @@ const MM = 72 / 25.4;
   await p2.waitForFunction(() => !window.__inkleaf.viewer.dirty, null, { timeout: 15000 });
   await p2.waitForTimeout(500);
   console.log('pages panel: thumbnail shown, blank page added and saved:', await p2.evaluate(() => window.__inkleaf.viewer.pageCount), 'pages');
+  // Snip: the picture reaches the system clipboard (marked as ours), and Ctrl+V pastes it at the same size.
+  await p2.keyboard.press('c');
+  await p2.keyboard.press('Control+9'); // fit the page, so the middle of the view is on it
+  await p2.waitForTimeout(500);
+  const z = await p2.evaluate(() => { const v = window.__inkleaf.viewer, r = v.rect; const [wx, wy] = v._toWorld(r.left + v.vw / 2, r.top + v.vh / 2); return [r.left + v.vw / 2 - 100, r.top + v.vh / 2 - 60, v.scale, v._hitPage(wx, wy, 0)]; });
+  await p2.mouse.move(z[0], z[1]); await p2.mouse.down(); await p2.mouse.move(z[0] + 200, z[1] + 120, { steps: 8 }); await p2.mouse.up();
+  await p2.waitForTimeout(1200);
+  const cb = await app2.evaluate(async ({ clipboard }) => {
+    const [it] = await clipboard.read();
+    const html = it && it.types.includes('text/html') ? await (await it.getType('text/html')).text() : '';
+    return { image: !!it && it.types.includes('image/png'), marked: /data-eagles-snip/.test(html) };
+  });
+  await p2.keyboard.press('Control+v');
+  await p2.waitForTimeout(800);
+  const pic = await p2.evaluate((i) => { const d = (window.__inkleaf.viewer.doc.annots.get(i) || []).at(-1); if (!d) return null; return d.shape && d.shape.k === 'image' ? [d.rect[2] - d.rect[0], d.rect[3] - d.rect[1]] : null; }, z[3]);
+  console.log('snip: system clipboard has the picture', cb.image, '· marked as ours', cb.marked, '· pasted at the same size', !!pic && Math.abs(pic[0] - 200 / z[2]) < 1.5 && Math.abs(pic[1] - 120 / z[2]) < 1.5);
+  await p2.keyboard.press('Control+s');
+  await p2.waitForFunction(() => !window.__inkleaf.viewer.dirty, null, { timeout: 15000 });
+  // Side by side
+  await p2.click('#btn-sidebar').catch(() => {});
+  if (!(await p2.isVisible('.sb-row:has-text("B2 services layout")'))) await p2.click('#btn-sidebar');
+  await p2.click('.sb-row:has-text("B2 services layout")', { button: 'right' });
+  await p2.click('.menu button:has-text("Open side by side")');
+  await p2.waitForFunction(() => document.querySelector('#viewer2 .page.ready'), null, { timeout: 15000 });
+  console.log('side by side:', await p2.textContent('.side-name'), '·', await p2.evaluate(() => Math.round(document.querySelector('#viewer2').getBoundingClientRect().width)) > 200);
+  await p2.click('.side-head [data-act=close]');
   await app2.close();
   console.log(logs.length ? logs.join('\n') : 'no errors');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

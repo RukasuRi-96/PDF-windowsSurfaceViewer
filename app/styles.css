@@ -188,10 +188,11 @@ input { font: inherit; color: inherit; user-select: text; }
 .viewer[data-tool="eraser"] { cursor: cell; }
 .viewer[data-tool="measure"] { cursor: crosshair; }
 .viewer[data-tool="content"] { cursor: crosshair; }
+.viewer[data-tool="snip"] { cursor: crosshair; }
 /* A pen near the screen shows a dot (the Pen tool's is its ink colour and size), not a crosshair. */
 .viewer.pen-near[data-tool="pen"] { cursor: var(--pen-cursor, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4' fill='white' fill-opacity='.85'/%3E%3Ccircle cx='5' cy='5' r='2.5' fill='%23222'/%3E%3C/svg%3E") 5 5, crosshair); }
 .viewer.pen-near[data-tool="highlight"], .viewer.pen-near[data-tool="box"], .viewer.pen-near[data-tool="content"],
-.viewer.pen-near[data-tool="measure"], .viewer.pen-near[data-tool="sign"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4' fill='white' fill-opacity='.85'/%3E%3Ccircle cx='5' cy='5' r='2.5' fill='%23222'/%3E%3C/svg%3E") 5 5, crosshair; }
+.viewer.pen-near[data-tool="measure"], .viewer.pen-near[data-tool="sign"], .viewer.pen-near[data-tool="snip"] { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='4' fill='white' fill-opacity='.85'/%3E%3Ccircle cx='5' cy='5' r='2.5' fill='%23222'/%3E%3C/svg%3E") 5 5, crosshair; }
 .viewer[data-tool="select"].over-text { cursor: text; }
 .viewer.panning, .viewer.panning[data-tool] { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
@@ -327,7 +328,7 @@ input { font: inherit; color: inherit; user-select: text; }
   text-align: center; white-space: nowrap;
   transition: opacity 0.25s;
 }
-#pagepill input { width: 52px; border: 0; border-radius: 6px; text-align: center; background: #fff; color: #111; padding: 2px 4px; }
+#pagepill input { width: 76px; border: 0; border-radius: 6px; text-align: center; background: #fff; color: #111; padding: 2px 4px; }
 .idle #pagepill { opacity: 0.35; }
 .no-doc #pagepill { display: none; }
 
@@ -367,6 +368,8 @@ input { font: inherit; color: inherit; user-select: text; }
 #toasts { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 6; pointer-events: none; }
 .toast { background: rgba(30, 32, 37, 0.92); color: #fff; padding: 9px 16px; border-radius: 10px; box-shadow: var(--shadow); animation: toast-in 0.18s ease-out; display: flex; gap: 8px; align-items: center; }
 .toast.error { background: var(--danger); }
+.toast-act { pointer-events: auto; margin-left: 4px; padding: 5px 12px; border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.18); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.toast-act:hover { background: rgba(255, 255, 255, 0.3); }
 .toast .icon { width: 18px; height: 18px; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
@@ -509,21 +512,23 @@ select {
 }
 
 /* ---------- pages panel ---------- */
-#pages { width: 188px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--border); min-height: 0; outline: 0; }
+#pages { width: 216px; flex: none; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--border); min-height: 0; outline: 0; }
 #pages[hidden] { display: none; }
-.pp-head { display: flex; align-items: center; gap: 0; padding: 7px 4px 7px 12px; border-bottom: 1px solid var(--border); }
+.pp-head { display: flex; align-items: center; gap: 0; padding: 7px 4px 7px 10px; border-bottom: 1px solid var(--border); }
 .pp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; font-size: 14px; white-space: nowrap; }
-.pp-count { color: var(--muted); font-weight: 400; }
-.pp-head .icon-btn { width: 32px; height: 34px; flex: none; }
+.pp-count { color: var(--muted); font-weight: 400; font-size: 12px; }
+.pp-head .icon-btn { width: 30px; min-width: 0; height: 34px; flex: none; }
 .pp-list { flex: 1; overflow-y: auto; position: relative; touch-action: pan-y; overscroll-behavior: contain; }
 .pp-inner { position: relative; }
-.pp-item { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.pp-item { position: absolute; left: 4px; right: 4px; padding-top: 6px; display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .pp-thumb { width: 132px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); outline: 3px solid transparent; outline-offset: 2px; border-radius: 2px; overflow: hidden; }
 .pp-thumb canvas { display: block; width: 100%; height: 100%; }
-.pp-item.current .pp-thumb { outline-color: var(--accent-soft); }
-.pp-item.sel .pp-thumb { outline-color: var(--accent); }
-.pp-num { height: 22px; line-height: 22px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.pp-item.sel .pp-num { color: var(--accent); font-weight: 600; }
+.pp-item.sel { background: var(--accent-soft); border-radius: 8px; }
+.pp-item.current .pp-thumb { outline-color: var(--accent); }
+.pp-item.current .pp-num { color: var(--accent); font-weight: 700; }
+.pp-item.lifted .pp-thumb { transform: scale(1.06); box-shadow: var(--shadow); transition: transform 0.12s; }
+.pp-num { height: 22px; line-height: 22px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; max-width: 188px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+
 .pp-drop { position: absolute; left: 14px; right: 14px; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
 .pp-drop[hidden] { display: none; }
 #pages.dragging .pp-item { cursor: grabbing; }
@@ -559,3 +564,27 @@ select {
 .ml-row .btn svg { width: 16px; height: 16px; }
 .ml-row [data-mv="-1"] svg { transform: rotate(-90deg); }
 .ml-row [data-mv="1"] svg { transform: rotate(90deg); }
+
+/* ---------- side by side ---------- */
+#app { --side-frac: 0.5; }
+#app.split #viewer { right: calc(var(--side-frac) * 100%); }
+#side { position: absolute; top: 0; bottom: 0; right: 0; width: calc(var(--side-frac) * 100%); display: flex; flex-direction: column; background: var(--stage); border-left: 1px solid var(--border); z-index: 3; }
+#side[hidden] { display: none; }
+#viewer2 { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; outline: 0; }
+#viewer2.viewer { position: relative; inset: auto; }
+.side-split { position: absolute; left: -6px; top: 0; bottom: 0; width: 12px; cursor: col-resize; z-index: 5; touch-action: none; }
+.side-split::after { content: ""; position: absolute; left: 5px; top: 50%; width: 2px; height: 44px; margin-top: -22px; border-radius: 1px; background: var(--muted); opacity: 0.5; }
+.side-head { display: flex; align-items: center; gap: 2px; padding: 4px 6px 4px 12px; background: var(--panel); border-bottom: 1px solid var(--border); min-height: 44px; }
+.side-name { font-weight: 600; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-page { flex: 1; margin-left: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.side-head .icon-btn { width: 34px; height: 34px; flex: none; }
+.side-tools { margin: 0 4px; }
+.side-tools .btn.active { background: var(--accent); color: #fff; }
+#app.split #pagepill, #app.split #measurebar { left: calc((100% - var(--side-frac) * 100%) / 2); }
+/* taller than wide (a tablet held upright): the second PDF goes below */
+#app.split.split-v #viewer { right: 0; bottom: calc(var(--side-frac) * 100%); }
+#app.split-v #side { top: auto; left: 0; width: auto; height: calc(var(--side-frac) * 100%); border-left: 0; border-top: 1px solid var(--border); }
+#app.split-v .side-split { left: 0; right: 0; top: -6px; bottom: auto; width: auto; height: 12px; cursor: row-resize; }
+#app.split-v .side-split::after { left: 50%; top: 5px; width: 44px; height: 2px; margin: 0 0 0 -22px; }
+#app.split.split-v #pagepill, #app.split.split-v #measurebar { left: 50%; bottom: calc(var(--side-frac) * 100% + 18px); }
+#app.split.split-v #measurebar { bottom: calc(var(--side-frac) * 100% + 62px); }

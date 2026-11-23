@@ -47,4 +47,18 @@ if reg and bold and serif:
     ]:
         c.setFont(font, size); c.setFillColorRGB(*color); c.drawString(57, y, text); y -= 28
     c.showPage(); c.save()
+# A drawing set whose sheets have names: page labels (A-101, A-102, M-201)
+# and bookmarks; the last page has only a plain number.
+os.makedirs(f"{root}/Drawings", exist_ok=True)
+c = canvas.Canvas(f"{root}/Drawings/Drawing set.pdf", pagesize=landscape(A4))
+sheets = [("A-", 101, "Ground floor plan"), ("A-", 102, "First floor plan"), ("M-", 201, "Ductwork layout"), (None, 4, None)]
+for i, (prefix, start, title) in enumerate(sheets):
+    c.setFont("Helvetica-Bold", 28); c.drawString(60, 520, f"Sheet {(prefix or '') + str(start)}  {title or 'Notes'}")
+    c.setFont("Helvetica", 12); c.drawString(60, 480, f"Drawing set page {i + 1}")
+    if title:
+        c.bookmarkPage(f"s{i}"); c.addOutlineEntry(title, f"s{i}", level=0)
+    if prefix: c.addPageLabel(i, style="D", start=start, prefix=prefix)
+    else: c.addPageLabel(i, style="D", start=start)
+    c.showPage()
+c.save()
 print("ok")

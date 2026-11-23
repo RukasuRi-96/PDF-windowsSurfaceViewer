@@ -2,7 +2,7 @@
 
 # Eagles PDF viewer
 
-A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, merges PDFs, lets you delete, add, copy in, move and rotate pages, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
+A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, opens a second PDF side by side, merges PDFs, lets you delete, add, copy in, move and rotate pages, copies any part of a page as a picture you can paste back at the same size, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
 
 ### ⬇ [Download Eagles PDF viewer for Windows (EaglesPDF-Setup.zip, 5 MB)](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)
 
@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.6.0** · Windows 10 or 11, 64-bit
+**Current version: 1.7.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -74,7 +74,7 @@ Go to **Settings**, then **Apps**, then **Installed apps**. Click **⋯** next t
 | **Mouse** | Middle-button drag, with any tool | Ctrl+wheel; the zoom buttons; click the **%** for presets | The wheel scrolls (or zooms, see below) |
 | **Keyboard** | Arrow keys, PgUp/PgDn, Space | Ctrl + / Ctrl − | Ctrl+0 fits width, Ctrl+9 fits page, Home/End jump to the first/last page |
 
-To jump to a page, click the page number at the bottom of the screen.
+To jump to a page, click the page counter at the bottom of the screen and type a page number, or a page name such as `A-101` if the PDF has them (see [page names](#page-names)).
 
 **Mouse wheel: scroll or zoom.** Open the **⋯** menu (or the **%** zoom menu) and choose **Mouse wheel scrolls** or **Mouse wheel zooms**.
 - In zoom mode, the wheel zooms around the pointer, and Shift+wheel scrolls.
@@ -92,7 +92,8 @@ The toolbar in the middle holds the tools:
 | **Pen** | P | Write or draw freehand. |
 | **Shapes** | B | Box, line, arrow, cloud, callout or text. Tap the tool again (or its small ▾) to choose. It always draws, even on top of other markups. See [Shapes, text and callouts](#4-shapes-text-and-callouts). |
 | **Signature** | S | Place your signature, with its background removed. See [Sign](#5-sign). |
-| **Eraser** | E | Removes the ink, shapes, text, signatures, highlights and measurements you touch. |
+| **Eraser** | E | Removes the ink, shapes, text, signatures, highlights, pictures and measurements you touch. |
+| **Snip** | C | Drag a box, or draw around something, to copy it as a picture. **Ctrl+V** pastes it at exactly the same size, as a picture you can move and resize. See [Snip](#9-snip-copy-part-of-a-page-as-a-picture). |
 | **Edit content** | X | Drag a box to erase an area of the page; tap a line of the page's own text to retype it. See [Edit the page's content](#6-edit-the-pages-content). |
 | **Measure** | R | Distance, path length and area at the drawing's scale (see below). |
 | **Pages** (top right) | Ctrl+Shift+P | Thumbnails of every page: delete, add blank pages, copy in pages from another PDF, duplicate, move and rotate. See [Pages](#7-pages-delete-add-copy-in-move-rotate). |
@@ -178,17 +179,22 @@ How the font is matched:
 
 Click the **Pages** button at the top right (or **Ctrl+Shift+P**) to show a thumbnail of every page on the right. Click it again, or the **×** on the panel, to hide it.
 
+- The page you're reading is **highlighted**, and the highlight follows you as you scroll.
 - **Click** a page to go to it. **Ctrl+click** or **Shift+click** selects several.
 - **Delete:** select pages and press **Delete**, or use the bin button.
 - **Add pages:** the **+** button, or right-click a page (with a finger: press and hold):
   - **Blank page…** in A4, A3, A5, Letter, Legal or Tabloid, or the same size as the page next to it, portrait or landscape, as many as you want, before or after any page;
   - **Pages from another PDF…**: all of them, or some (like `1-3, 5`);
   - **Duplicate**.
-- **Move:** drag pages up or down with the mouse or pen, or right-click → **Move to the start / end**.
+- **Move:** drag pages up or down with the mouse or pen. With a finger, **press and hold** a page until it lifts, then drag it up or down (hold without moving to get the menu instead). A line shows where it will go. You can also right-click → **Move to the start / end**.
 - **Rotate:** right-click → **Rotate right / left**.
 - Every change can be undone (**Ctrl+Z**) and redone (**Ctrl+Y**). Saving writes the new pages into the PDF. Pages you delete are removed from the file, not just hidden.
 
 Thumbnails are drawn only for the pages in view, and only after the page you're reading, so even a 500-page PDF stays fast.
+
+#### Page names
+
+Many drawing sets and reports name their pages, such as `A-101` or `iii`, and many have bookmarks such as *Ground floor plan*. The app shows these names under each thumbnail and in the page counter at the bottom, as in **3 · M-201 · Ductwork layout**. Click the **tag** button at the top of the panel to show **Page numbers**, **Page names** or **Numbers and names**. Go to page (**Ctrl+G**, or click the page counter) also takes a name. The names stay with their pages when you move, delete or add pages.
 
 You can also right-click a PDF in the file list and choose **Insert into the open PDF…**.
 
@@ -199,7 +205,31 @@ You can also right-click a PDF in the file list and choose **Insert into the ope
 
 A window shows the PDFs in order. Use the arrows to change the order, or **×** to leave one out, then choose where to save the merged PDF. It opens straight away. Password-protected PDFs are left out (you're told which).
 
-### 9. Select and copy text
+### 9. Snip: copy part of a page as a picture
+
+1. Choose **Snip** (**C**, the scissors).
+2. With the pen, mouse or a finger:
+   - **drag a box** over what you want; or
+   - **draw around it** (a lasso). Only what's inside your outline is copied, and the rest of the picture is see-through.
+3. It's copied straight away, sharp enough to zoom in on, and other apps such as Word, Outlook or Paint can paste it too.
+4. **Paste:** press **Ctrl+V** (it lands where the pointer is), or tap **Paste** on the *Copied* message (it lands in the middle of the view). **⋯ → Paste picture** does the same. You can paste into another page, another PDF, or the PDF open on the other side.
+5. The picture is pasted at **exactly the same size** as the original, and selected. **Drag** it to move it, and drag a **corner** to make it bigger or smaller; it keeps its proportions. **Delete** removes it.
+
+Pictures copied in other apps (screenshots, photos) paste too, at their normal on-screen size. Saving writes the picture into the PDF as a standard image markup, so it shows in other PDF apps. Use **⋯ → Embed markups…** to make it part of the page.
+
+### 10. Side by side: two PDFs at once
+
+- **Open:** right-click a PDF in the file list (with a finger: press and hold) → **Open side by side**. You can also use **⋯ → Open a PDF side by side…** or **Ctrl+Shift+O**.
+- It opens next to the PDF you're working on, or below it when the window is taller than it is wide (a tablet held upright).
+- **Move around** in either PDF on its own: drag it with a finger, or with the pen or mouse when its **hand** button is on; pinch or Ctrl+wheel to zoom; **↔** fits it to the width. The keyboard (arrows, PgUp/PgDn, Home/End, zoom keys) moves whichever PDF you touched last.
+- **Resize:** drag the bar between the two PDFs.
+- **Copy from it:** tap its **scissors** button and snip, then paste into the PDF you're editing.
+- **Edit it:** you mark up the main PDF. Tap **⇄** to swap the two, then mark up the other one.
+- **Close:** the **×** at the top of the side PDF.
+
+The side PDF has its own renderer, so the main PDF stays as fast as before. The app remembers the side PDF and where you left the divider.
+
+### 11. Select and copy text
 
 1. Choose **Select** (**V**).
 2. Drag over the text you want. A selection can run across several pages, and it scrolls the page when you drag near the edge.
@@ -210,7 +240,7 @@ A window shows the PDFs in order. Use the arrows to change the order, or **×** 
 
 Click on blank paper or press **Esc** to clear the selection.
 
-### 10. Measure drawings
+### 12. Measure drawings
 
 1. **Choose Measure** (**R**). A measuring bar appears at the bottom of the page.
 2. **Set the drawing's scale.** Click the scale button on the left of the measuring bar. It says *Scale not set* until you set one.
@@ -236,14 +266,14 @@ Each measurement is saved into the PDF as a standard PDF measurement markup, wit
 
 > A measurement is only as accurate as the scale. For drawings marked *NTS* (not to scale), or ones that may have been printed or scanned at a different size, calibrate against a known dimension first.
 
-### 11. Save and embed
+### 13. Save and embed
 
 - **Ctrl+S** (or the save button) writes your markups into the PDF as standard annotations. Acrobat, Edge, Bluebeam and other PDF apps show them too, and they stay movable and editable.
 - **Ctrl+Shift+S** saves a copy under a new name.
 - A blue dot next to the file name means there are unsaved changes. The app asks before you close or switch files with unsaved changes.
 - If another program changed the file after you opened it, the app asks before overwriting those changes.
 
-**Embed markups** (**⋯ → Embed markups…**) makes highlights, drawings, shapes, text, callouts and signatures part of the pages. After that they can't be moved, edited or deleted, in this app or any other PDF app. Use it when you send out a final, signed or marked-up copy. Erase areas are applied at the same time, and form fields stay fillable. You choose:
+**Embed markups** (**⋯ → Embed markups…**) makes highlights, drawings, shapes, text, callouts, signatures and pasted pictures part of the pages. After that they can't be moved, edited or deleted, in this app or any other PDF app. Use it when you send out a final, signed or marked-up copy. Erase areas are applied at the same time, and form fields stay fillable. You choose:
 
 - **Save as a copy…** (suggested name: *name (embedded).pdf*). The file you have open keeps its editable markups.
 - **Replace this file.** The open file is rewritten with everything embedded. This can't be undone.
@@ -266,18 +296,20 @@ The defaults:
 
 | Keys | Action |
 |---|---|
-| V · H · M · P · B · S · E · X · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Edit content · Measure |
+| V · H · M · P · B · S · E · C · X · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Snip · Edit content · Measure |
 | T | Finger draws on/off |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / Redo |
 | Ctrl+C / Ctrl+A | Copy selected text / Select all text on the page |
+| Ctrl+V | Paste a snipped picture at the same size |
 | Enter or F2 · Delete or Backspace | Edit the selected text box or callout · delete the selected markup or signature |
 | Ctrl + / Ctrl − / Ctrl+0 / Ctrl+9 / Ctrl+1 | Zoom in / out / fit width / fit page / 100% |
 | PgUp / PgDn / Space · Home / End | Scroll a screen · first / last page |
-| Ctrl+G | Go to page |
+| Ctrl+G | Go to page (number or name) |
 | Alt+↑ / Alt+↓ | Previous / next PDF in the list |
 | Ctrl+O · Ctrl+F · Ctrl+B · F5 | Open folder · filter files · show/hide the file list · refresh it |
 | Ctrl+Shift+P · Delete (in the panel) | Show/hide the Pages panel · delete the selected pages |
+| Ctrl+Shift+O | Open a PDF side by side |
 | F11 · F1 · Ctrl+K | Full screen · help · keyboard shortcuts |
 
 These keys always do the same thing in their situation:
@@ -324,10 +356,10 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 | `app/shortcuts.js` | Key combos by physical key position, display names, and the keymap of user overrides on top of the defaults. Every command and its default keys live in the `COMMANDS` list in `app/main.js`. |
 | `app/sigproc.js` | Signature background removal: paper colour from the image border, automatic threshold (Otsu), soft edges, paper-tint removal at stroke edges, ink recolouring, crop and PNG export. |
 | `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. Ctrl/Shift+click or Select mode picks files to merge. |
-| `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), selection, drag to reorder. |
+| `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), the current-page highlight, page names, selection, and drag (or press and hold) to reorder. |
 | `app/inkgeom.js` | Pressure strokes: width from pen pressure and the stroke's outline, shared by the viewer and the engine. |
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
-| `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, and the open/save flow. |
+| `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, the open/save flow, snip and paste, and the side-by-side view. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
 | `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Eagles PDF viewer.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
 | `tools/devserver.js` | Runs the same UI in a normal browser for testing. |
@@ -337,6 +369,12 @@ Shapes are standard annotations: box and cloud are `Square` (the cloud uses the 
 Erase areas are `Redact` annotations with an `InkleafShape` key until you save. Saving applies them to a temporary copy of the document: MuPDF's redaction removes the text, covered line art and image pixels under them (other annotations are detached from the page meanwhile, so they survive), the areas are painted white, and the whole file is rewritten with garbage collection, so no old copy of the erased content stays in it. A retyped line is one item (a `Redact` annotation whose `InkleafShape` key holds the text, size, colour, baseline origin, the old line's box and the laid-out glyph runs). The viewer draws it from MuPDF's SVG of those glyphs in the chosen font. On save, the old line's box is redacted and whited out, the font is embedded (`addFont`, with our own `ToUnicode` map), and the text is written into the page content as glyph runs. Everything happens in the order it was made, so a later erase area also removes earlier edited text. The font is the page's own embedded font when its glyphs (captured from the page's text) cover the new text; otherwise the installed font found by `electron/fontindex.js` (name tables of the system fonts, with metric-compatible fallbacks such as Carlito for Calibri), fetched by the worker and subset on save; otherwise a base-14 font. **Embed markups** does the same on a temporary copy, then bakes every annotation into the page content (`bake`, with form widgets left alone).
 
 Page changes (delete, blank page, insert from another PDF, duplicate, move with `rearrangePages`, rotate) are made to the open document in the edit worker, which then rewrites it in memory with garbage collection (so removed pages' content is gone) and reopens it; the render workers reopen the same bytes. Undo keeps the document as it was before each change. Merging grafts every page of each file into a new document, with one graft map per file so shared fonts and images are copied once.
+
+Page names come from the PDF's page labels (`/PageLabels`, ignored where they're just the page number) and from its bookmarks. MuPDF's `rearrangePages` drops page labels, so before a page change the edit worker reads each page's label and afterwards writes an explicit `/PageLabels` number tree with one entry per page, following each page to its new position.
+
+The Snip tool asks the edit worker to render just the snipped rectangle (page content, markups and form fields) at the zoom you see it at or at least 144 dpi, capped at 16 megapixels. A lasso is cut out with a canvas clip, which leaves the outside transparent. The PNG goes to the system clipboard together with a small HTML part that marks it as the app's own snip, so pasting it back uses its exact size in points. A pasted picture is a `Stamp` annotation with the image as its appearance, like a signature.
+
+The side-by-side PDF gets its own `Engine` (an edit worker and two render workers) and its own `Viewer`, created only when you open one and stopped when you close it, so a single PDF costs nothing extra.
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
 

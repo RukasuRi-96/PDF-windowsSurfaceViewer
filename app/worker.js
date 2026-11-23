@@ -158,6 +158,29 @@ async function render({ page, res, bbox }) {
   }
 }
 
+// An area of a page as a PNG, for copying: the page with its markups
+// (pending erase areas and retyped lines aside), `res` pixels per point.
+function snip({ page, rect, res }) {
+  const p = entry(page).page;
+  const bbox = [Math.floor(rect[0] * res), Math.floor(rect[1] * res), Math.ceil(rect[2] * res), Math.ceil(rect[3] * res)];
+  const pix = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, bbox, false);
+  try {
+    pix.clear(255);
+    const dev = new mupdf.DrawDevice(mupdf.Matrix.identity, pix);
+    const m = mupdf.Matrix.scale(res, res);
+    try {
+      p.runPageContents(dev, m);
+      for (const a of p.getAnnotations()) if (!contentKind(a.getObject())) { try { a.run(dev, m); } catch {} }
+      try { p.runPageWidgets(dev, m); } catch {}
+    } finally { dev.close(); dev.destroy(); }
+    const buf = pix.asPNG();
+    const png = buf.slice ? buf.slice() : new Uint8Array(buf);
+    return { result: { png, w: pix.getWidth(), h: pix.getHeight() }, transfer: [png.buffer] };
+  } finally {
+    pix.destroy();
+  }
+}
+
 // A page thumbnail, drawn straight from the page (no cached display list, so
 // thumbnails never push the page view's lists out of the cache).
 async function thumb({ page, res, bbox }) {
@@ -347,7 +370,7 @@ function setShapeProps(a, k, data, info) {
     a.setColor(data.color);
     a.setBorderWidth(data.width);
     a.setRect(data.rect);
-  } else if (k === "sig" || k === "redact") {
+  } else if (k === "sig" || k === "image" || k === "redact") {
     a.setRect(data.rect);
   } else if (k === "ink") {
     a.setColor(data.color);
@@ -419,11 +442,11 @@ function createShape(p, data) {
     }
   } else if (k === "redact") {
     a = p.createAnnotation("Redact");
-  } else if (k === "sig") {
+  } else if (k === "sig" || k === "image") {
     a = p.createAnnotation("Stamp");
     a.setRect(data.rect);
     a.setStampImage(new mupdf.Image(data.png));
-    a.setContents("Signature");
+    a.setContents(k === "sig" ? "Signature" : "Picture");
   } else {
     throw new Error("Unknown shape " + k);
   }
@@ -819,13 +842,28 @@ function openFrom(bytes, password) {
   }
   const n = doc.countPages();
   const info = new Float64Array(n * 4);
+  // Page names: the PDF's own page labels ("A-101", "iv"; plain numbers
+  // don't count) and the bookmark that points at the page.
+  const labels = new Array(n).fill("");
   for (let i = 0; i < n; i++) {
     const p = doc.loadPage(i);
     const b = p.getBounds();
     info[i * 4] = b[0]; info[i * 4 + 1] = b[1]; info[i * 4 + 2] = b[2]; info[i * 4 + 3] = b[3];
+    try { const l = (p.getLabel() || "").trim(); if (l && l !== String(i + 1)) labels[i] = l; } catch {}
     p.destroy();
   }
-  return { needsPassword: false, pageCount: n, bounds: info, isPDF: doc.isPDF() };
+  const titles = new Array(n).fill("");
+  try {
+    const walk = (items) => {
+      for (const it of items || []) {
+        if (it.page >= 0 && it.page < n && !titles[it.page] && it.title) titles[it.page] = it.title.trim();
+        walk(it.down);
+      }
+    };
+    walk(doc.loadOutline());
+  } catch {}
+  const names = labels.map((l, i) => [l, titles[i]].filter(Boolean).filter((v, k, a) => a.indexOf(v) === k).join(" · "));
+  return { needsPassword: false, pageCount: n, bounds: info, names: names.some(Boolean) ? names : null, isPDF: doc.isPDF() };
 }
 
 let fileBytes = null;
@@ -867,20 +905,48 @@ function graftPages(src, list, at) {
   list.forEach((sp, k) => map.graftPage(at + k, src, sp));
 }
 
+// Page labels ("A-101") belong to positions in a PDF: after pages move,
+// are deleted or added, each page's own label is written back explicitly.
+function readLabels() {
+  try {
+    if (doc.getTrailer().get("Root").get("PageLabels").isNull()) return null;
+    const n = doc.countPages(), out = [];
+    for (let i = 0; i < n; i++) { const p = doc.loadPage(i); const l = p.getLabel(); p.destroy(); out.push(l && l !== String(i + 1) ? l : null); }
+    return out.some((l) => l) ? out : null;
+  } catch { return null; }
+}
+function writeLabels(from, old) {
+  const nums = doc.newArray();
+  from.forEach((k, i) => {
+    const d = doc.newDictionary();
+    d.put("P", doc.newString(k != null && old[k] ? old[k] : String(i + 1)));
+    nums.push(doc.newInteger(i));
+    nums.push(d);
+  });
+  const pl = doc.newDictionary();
+  pl.put("Nums", nums);
+  doc.getTrailer().get("Root").put("PageLabels", pl);
+}
+const span = (a, b) => Array.from({ length: Math.max(0, b - a) }, (_, k) => a + k);
+
 async function pageOp(op) {
   const n = doc.countPages();
   const valid = (i) => Number.isInteger(i) && i >= 0 && i < n;
+  const labels = op.kind === "rotate" ? null : readLabels();
+  let from = null; // for each new page, the old page it came from (null: new)
   switch (op.kind) {
     case "delete": {
       const list = [...new Set(op.pages)].filter(valid).sort((a, b) => b - a);
       if (!list.length) throw new Error("No pages to delete");
       if (list.length >= n) throw new Error("A PDF needs at least one page");
       for (const i of list) doc.deletePage(i);
+      from = span(0, n).filter((i) => !list.includes(i));
       break;
     }
     case "blank": {
-      const at = Math.max(0, Math.min(n, op.at));
-      for (let k = 0; k < Math.max(1, Math.min(100, op.count || 1)); k++) doc.insertPage(at + k, doc.addPage([0, 0, op.w, op.h], 0, null, ""));
+      const at = Math.max(0, Math.min(n, op.at)), c = Math.max(1, Math.min(100, op.count || 1));
+      for (let k = 0; k < c; k++) doc.insertPage(at + k, doc.addPage([0, 0, op.w, op.h], 0, null, ""));
+      from = [...span(0, at), ...Array(c).fill(null), ...span(at, n)];
       break;
     }
     case "insert": {
@@ -888,7 +954,9 @@ async function pageOp(op) {
       try {
         const m = src.countPages();
         const list = (op.pages && op.pages.length ? op.pages : [...Array(m).keys()]).filter((i) => i >= 0 && i < m);
-        graftPages(src, list, Math.max(0, Math.min(n, op.at)));
+        const at = Math.max(0, Math.min(n, op.at));
+        graftPages(src, list, at);
+        from = [...span(0, at), ...Array(list.length).fill(null), ...span(at, n)];
       } finally { src.destroy(); }
       break;
     }
@@ -897,7 +965,9 @@ async function pageOp(op) {
       const src = mupdf.Document.openDocument(snapshot(""), "application/pdf");
       try {
         if (src.needsPassword()) src.authenticatePassword(docPassword || "");
-        graftPages(src, list, Math.max(0, Math.min(n, op.at)));
+        const at = Math.max(0, Math.min(n, op.at));
+        graftPages(src, list, at);
+        from = [...span(0, at), ...list, ...span(at, n)];
       } finally { src.destroy(); }
       break;
     }
@@ -905,6 +975,7 @@ async function pageOp(op) {
       // op.order: the old index of each page, in the new order.
       if (op.order.length !== n || new Set(op.order).size !== n || !op.order.every(valid)) throw new Error("Bad page order");
       doc.rearrangePages(op.order);
+      from = op.order.slice();
       break;
     }
     case "rotate": {
@@ -919,13 +990,14 @@ async function pageOp(op) {
     default:
       throw new Error("Unknown page change " + op.kind);
   }
+  if (labels && from) writeLabels(from, labels);
 }
 
 function structureResult(before) {
   const after = snapshot("garbage=yes,compress=yes");
   const r = reloadFrom(after);
   const forRenderers = after.slice();
-  const result = { bytes: forRenderers, bounds: r.bounds, pageCount: r.pageCount };
+  const result = { bytes: forRenderers, bounds: r.bounds, pageCount: r.pageCount, names: r.names };
   const transfer = [forRenderers.buffer, r.bounds.buffer];
   if (before) { result.before = before; transfer.push(before.buffer); }
   return { result, transfer };
@@ -997,6 +1069,7 @@ const handlers = {
   },
   render,
   thumb,
+  snip,
   pageAnnots({ page }) {
     const e = entry(page);
     const out = [];

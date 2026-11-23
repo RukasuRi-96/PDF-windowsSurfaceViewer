@@ -27,6 +27,7 @@ const cfg = Object.assign(
     sidebarOpen: true,
     pagesOpen: false,     // the Pages panel on the right
     blankSize: "A4",      // last size chosen for a blank page
+    pageLabels: "both",   // pages show their number, name or both
     sidebarW: 300,
     shape: "box",         // box tool: box | line | arrow | cloud | callout | text
     textStyle: null,
@@ -76,8 +77,8 @@ const state = { path: null, gen: 0, saving: false };
 
 const viewer = new Viewer($("#viewer"), engine, {
   onPage(i, n) {
-    pagePill.textContent = `${i + 1} / ${n}`;
     pagesPanel.setCurrent(i);
+    showPagePill(i, n);
     if (cfg.tool === "measure") updateMeasureBar();
     rememberView();
     pokeIdle();
@@ -92,6 +93,7 @@ const viewer = new Viewer($("#viewer"), engine, {
   onCopy: (text) => copyText(text),
   onError: (msg) => toast(msg, "error"),
   onInfo: (msg) => toast(msg),
+  onSnip: (s) => snipFrom(engine, s),
   // The installed font matching a PDF font, for retyping a line in it.
   findFont: async (face) => {
     const f = host.findFont ? await host.findFont({ name: face.name, bold: face.bold, italic: face.italic }) : null;
@@ -132,6 +134,9 @@ const pagesPanel = new PagesPanel($("#pages"), engine, {
   onMove: (order, moved) => movePages(order, moved),
   onMenu: (i, x, y) => pageMenu({ x, y }),
   onAddMenu: (anchor) => addPagesMenu(anchor),
+  onLabelsMenu: (anchor) => showMenu(anchor, [["number", "Page numbers"], ["name", "Page names"], ["both", "Numbers and names"]].map(([k, label]) => ({
+    label, icon: cfg.pageLabels === k ? "check" : null, run: () => setPageLabels(k),
+  }))),
   onClose: () => togglePages(false),
 });
 
@@ -158,7 +163,8 @@ setIcon("#btn-save", "save");
 setIcon("#btn-more", "more");
 setIcon("#btn-touch", "touch");
 $("#empty-open").innerHTML = icon("folderOpen") + " Open folder";
-const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", pen: "pen", box: "square", eraser: "eraser", measure: "ruler", sign: "signature", content: "replaceText" };
+const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", pen: "pen", box: "square", eraser: "eraser", measure: "ruler", sign: "signature", content: "replaceText", snip: "scissors" };
+const SNIP_HINT = "Drag a box, or draw around something, to copy it as a picture · Ctrl+V pastes it";
 function updateToolIcons() {
   for (const b of document.querySelectorAll(".tool")) {
     const t = b.dataset.tool;
@@ -206,6 +212,7 @@ function applyStyles() {
 function setWheel(mode, announce = true) {
   cfg.wheel = mode === "zoom" ? "zoom" : "scroll";
   viewer.wheelZooms = cfg.wheel === "zoom";
+  if (side.viewer) side.viewer.wheelZooms = viewer.wheelZooms;
   saveCfg();
   if (announce) toast(cfg.wheel === "zoom" ? "Mouse wheel zooms · Shift+wheel scrolls" : "Mouse wheel scrolls · Ctrl+wheel zooms");
 }
@@ -260,6 +267,7 @@ $("#tools").addEventListener("click", (e) => {
   if (t === "sign") { if (cfg.tool !== "sign") setTool("sign"); openSignPanel(); return; }
   if (t === "box" && e.target.closest("[data-caret]")) { if (cfg.tool !== "box") setTool("box"); openStylePopover(); return; }
   if (t === "content") { setTool("content"); toast(CONTENT_HINT); return; }
+  if (t === "snip") { setTool("snip"); toast(SNIP_HINT); return; }
   if (t === cfg.tool && cfg.tool === "measure") openMeasurePopover();
   else if (t === cfg.tool && cfg.styles[cfg.tool]) openStylePopover();
   else setTool(t);
@@ -301,7 +309,12 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   { label: "Insert pages from another PDF…", icon: "openFile", key: keyOf("pages.insert"), run: () => insertPagesDialog(null), disabled: !state.path },
   { label: "Merge all PDFs in the folder…", icon: "merge", key: keyOf("file.mergeFolder"), run: () => mergeFolder(), disabled: !cfg.folder },
   "-",
+  { label: "Open a PDF side by side…", icon: "pages", key: keyOf("view.side"), run: () => openSide(null) },
+  side.path && { label: "Swap sides", icon: "swap", key: keyOf("view.sideSwap"), run: () => swapSides() },
+  side.path && { label: "Close side by side", icon: "x", key: keyOf("view.sideClose"), run: () => closeSide() },
+  "-",
   { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
+  { label: "Paste picture", icon: "clipboard", key: keyOf("edit.paste"), run: () => paste({ center: true }), disabled: !state.path },
   { label: "Drawing scale…", icon: "ruler", run: () => scaleDialog(), disabled: !state.path },
   "-",
   ...wheelItems(),
@@ -459,13 +472,23 @@ function dialog({ title, message = "", html = "", input = null, buttons, collect
   });
 }
 
-function toast(msg, kind = "") {
+// A short message at the bottom; `action` ({label, run}) adds a button to it.
+function toast(msg, kind = "", action = null) {
   const t = document.createElement("div");
-  t.className = "toast " + kind;
+  t.className = "toast " + kind + (action ? " act" : "");
+  // A newer message replaces one with a button (its offer is out of date).
+  document.querySelectorAll("#toasts .toast.act").forEach((o) => o.remove());
   t.innerHTML = (kind === "error" ? "" : icon("check")) + "<span></span>";
   t.querySelector("span").textContent = msg;
+  if (action) {
+    const b = document.createElement("button");
+    b.className = "toast-act";
+    b.textContent = action.label;
+    b.onclick = () => { t.remove(); action.run(); };
+    t.appendChild(b);
+  }
   $("#toasts").appendChild(t);
-  setTimeout(() => t.remove(), kind === "error" ? 5000 : 1800);
+  setTimeout(() => t.remove(), action ? 6000 : kind === "error" ? 5000 : 1800);
 }
 
 async function showHelp() {
@@ -480,6 +503,8 @@ async function showHelp() {
     ["Shapes tool ▾", "Box, line, arrow, cloud, callout or text; it always draws, even on top of other markups"],
     ["Typing in a text box", "Enter finishes · Shift+Enter starts a new line · Esc cancels"],
     ["Edit content tool", "Drag a box to erase an area · tap a line of text to retype it (same font, size and colour); tap it again to change it"],
+    ["Side by side", "Right-click a PDF in the list › Open side by side (or Ctrl+Shift+O) · drag the divider · ⇄ swaps · the keys move whichever PDF you touched last"],
+    ["Snip tool (C)", "Drag a box, or draw around something, to copy it as a picture · Ctrl+V pastes it at the same size, then drag it or its corners"],
     ["Pages panel", "Click a page to go to it · drag pages to reorder (mouse or pen) · right-click (or press and hold) to add, copy in, duplicate, rotate or delete"],
     ["File list: Ctrl+click / Shift+click", "Select several PDFs, then right-click › Merge · right-click a folder › Merge all PDFs in this folder"],
     ["Callout", "Drag from the spot you're marking to where the text goes, then type"],
@@ -1016,6 +1041,22 @@ async function openFile(path, { force = false } = {}) {
 }
 
 // ------------------------------------------------------------------ pages
+// The page counter at the bottom: "3 / 12", with the page's name if it has one.
+function showPagePill(i, n) {
+  const name = viewer.doc?.pages[i]?.name;
+  const num = `${i + 1} / ${n}`;
+  pagePill.textContent = name && cfg.pageLabels !== "number" ? (cfg.pageLabels === "name" ? name : `${name} · ${num}`) : num;
+  pagePill.title = name ? `Page ${i + 1} of ${n}: ${name}` : "Go to page";
+}
+
+function setPageLabels(mode) {
+  cfg.pageLabels = mode;
+  pagesPanel.setLabelMode(mode);
+  if (viewer.doc) showPagePill(viewer.currentPage(), viewer.pageCount);
+  if (side.viewer?.doc) showSidePage(side.viewer.currentPage(), side.viewer.pageCount);
+  saveCfg();
+  toast(mode === "number" ? "Showing page numbers" : mode === "name" ? "Showing page names (numbers where a page has no name)" : "Showing page numbers and names");
+}
 // Delete, add, copy in, duplicate, move and rotate pages. Each change is one
 // undo step (the document before it is kept); saving writes the new pages.
 const PAPER = [["A4", 210, 297, "mm"], ["A3", 297, 420, "mm"], ["A5", 148, 210, "mm"], ["Letter", 8.5, 11, "in"], ["Legal", 8.5, 14, "in"], ["Tabloid", 11, 17, "in"]];
@@ -1033,7 +1074,8 @@ function togglePages(force) {
 function showNewPages(pages, focus, keep, select) {
   const gen = ++state.gen;
   focus = Math.max(0, Math.min(pages.length - 1, focus));
-  viewer.open(gen, pages, { mode: keep?.mode, scale: keep?.scale, sx: keep?.sx, page: focus, offset: focus === keep?.page ? keep.offset : 0 });
+  const same = focus === keep?.page;
+  viewer.open(gen, pages, { mode: keep?.mode, scale: keep?.scale, sx: same ? keep?.sx : null, page: focus, offset: same ? keep.offset : 0 });
   viewer.setTool(cfg.tool);
   viewer.markChanged();
   pagesPanel.setDocument(pages, focus, select);
@@ -1231,6 +1273,217 @@ async function insertPagesDialog(path, at = pagesPanel.insertAt()) {
   changePages({ kind: "insert", url, password, pages, at: r.data.where }, { focus: r.data.where, select: range(r.data.where, pages.length), done: `Inserted ${pageWord(pages.length)} from “${baseName(path)}”` });
 }
 
+// ------------------------------------------------------------------ snip & paste
+// The Snip tool copies an area as a picture: onto the system clipboard (for
+// any app) and kept here with its size, so Ctrl+V pastes it back at exactly
+// the same size, ready to move or resize.
+let clip = null; // { id, png, w, h } (w, h in points)
+
+async function snipFrom(eng, s) {
+  const w = s.rect[2] - s.rect[0], h = s.rect[3] - s.rect[1];
+  // Sharp: at least 144 dpi, or as sharp as it was on screen; at most 16 MP.
+  let res = Math.max(2, s.zoom || 2);
+  res = Math.min(res, Math.sqrt(16e6 / Math.max(1, w * h)), 6000 / Math.max(w, h));
+  let out;
+  try { out = await eng.snip(s.page, s.rect, res); } catch (err) { toast("Couldn't copy that: " + err.message, "error"); return; }
+  if (!out) return;
+  let png = out.png;
+  if (s.poly) png = await lassoCut(png, s.rect, s.poly, res);
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  clip = { id, png, w, h };
+  // The system clipboard gets the picture (for any app) plus a small html
+  // part marking it as ours, so pasting it back here keeps its exact size.
+  let sys = false;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({
+      "image/png": new Blob([png], { type: "image/png" }),
+      "text/html": new Blob([`<img data-eagles-snip="${id}" alt="">`], { type: "text/html" }),
+    })]);
+    sys = true;
+  } catch {}
+  toast(sys ? "Copied · Ctrl+V pastes it at the same size (other apps can paste it too)" : "Copied · Ctrl+V pastes it at the same size",
+    "", { label: "Paste", run: () => paste({ center: true }) });
+}
+
+// A lasso: keep only what's inside the shape (the rest is transparent).
+async function lassoCut(png, rect, poly, res) {
+  const bmp = await createImageBitmap(new Blob([png], { type: "image/png" }));
+  const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext("2d");
+  const ox = Math.floor(rect[0] * res), oy = Math.floor(rect[1] * res);
+  g.beginPath();
+  poly.forEach(([x, y], k) => { const X = x * res - ox, Y = y * res - oy; if (k) g.lineTo(X, Y); else g.moveTo(X, Y); });
+  g.closePath();
+  g.clip();
+  g.drawImage(bmp, 0, 0);
+  bmp.close();
+  return new Uint8Array(await (await c.convertToBlob({ type: "image/png" })).arrayBuffer());
+}
+
+// Paste the snip (or a picture copied in another app) where the pointer is,
+// or in the middle of the view (`center`, for the Paste buttons).
+async function paste({ center = false } = {}) {
+  if (!state.path) return;
+  let png = null, w = 0, h = 0, sys = null;
+  try {
+    for (const it of await navigator.clipboard.read()) {
+      if (!it.types.includes("image/png")) continue;
+      const html = it.types.includes("text/html") ? await (await it.getType("text/html")).text() : "";
+      sys = { blob: await it.getType("image/png"), id: (/data-eagles-snip="([\w-]+)"/.exec(html) || [])[1] || null };
+      break;
+    }
+  } catch {}
+  if (sys && !(clip && sys.id === clip.id)) {
+    // A picture from another app: its usual size on screen (96 dpi).
+    const bm = await createImageBitmap(sys.blob);
+    png = new Uint8Array(await sys.blob.arrayBuffer()); w = bm.width * 0.75; h = bm.height * 0.75;
+    bm.close();
+  } else if (clip) {
+    ({ png, w, h } = clip);
+  }
+  if (!png) { toast("Nothing to paste: copy part of a page with the Snip tool (C) first"); return; }
+  const at = viewer.pastePoint(center);
+  if (!at) return;
+  if (cfg.tool !== "select") setTool("select");
+  const shrunk = viewer.insertPicture(at.page, at.p, png, w, h);
+  toast(shrunk ? "Pasted, made smaller to fit the page · drag to move, corners to resize" : "Pasted at the same size · drag to move, corners to resize");
+}
+
+// ------------------------------------------------------------------ side by side
+// A second PDF next to the open one (below it when the window is taller than
+// wide), to read and compare: pan, zoom, snip. It has its own engine with two
+// renderers, started when it opens and stopped when it closes.
+const side = { engine: null, viewer: null, path: null, gen: 0, tool: "hand", active: false };
+const sideEl = $("#side");
+for (const b of sideEl.querySelectorAll("[data-tool]")) b.innerHTML = icon(b.dataset.tool === "snip" ? "scissors" : "hand");
+sideEl.querySelector('[data-act="fit"]').innerHTML = icon("fitWidth");
+sideEl.querySelector('[data-act="swap"]').innerHTML = icon("swap");
+sideEl.querySelector('[data-act="close"]').innerHTML = icon("x");
+sideEl.querySelector(".side-head").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.tool) setSideTool(b.dataset.tool);
+  else if (b.dataset.act === "fit") side.viewer?.fit("width");
+  else if (b.dataset.act === "swap") swapSides();
+  else if (b.dataset.act === "close") closeSide();
+});
+sideEl.addEventListener("pointerdown", () => { side.active = true; }, true);
+$("#viewer").addEventListener("pointerdown", () => { side.active = false; }, true);
+
+function setSideTool(t) {
+  side.tool = t;
+  side.viewer?.setTool(t);
+  for (const b of sideEl.querySelectorAll("[data-tool]")) b.classList.toggle("active", b.dataset.tool === t);
+  if (t === "snip") toast(SNIP_HINT);
+}
+
+function setSideFrac(f) {
+  cfg.sideFrac = Math.max(0.2, Math.min(0.8, f));
+  appEl.style.setProperty("--side-frac", cfg.sideFrac);
+}
+
+function sideLayout() {
+  if (!side.path) return;
+  const r = $("#stage").getBoundingClientRect();
+  appEl.classList.toggle("split-v", r.height > r.width * 1.1);
+}
+window.addEventListener("resize", sideLayout);
+
+// Drag the divider to give either PDF more room.
+sideEl.querySelector(".side-split").addEventListener("pointerdown", (e) => {
+  const bar = e.currentTarget;
+  bar.setPointerCapture(e.pointerId);
+  const move = (ev) => {
+    const r = $("#stage").getBoundingClientRect();
+    setSideFrac(appEl.classList.contains("split-v") ? (r.bottom - ev.clientY) / r.height : (r.right - ev.clientX) / r.width);
+  };
+  const up = () => { bar.removeEventListener("pointermove", move); bar.removeEventListener("pointerup", up); bar.removeEventListener("pointercancel", up); saveCfg(); };
+  bar.addEventListener("pointermove", move);
+  bar.addEventListener("pointerup", up);
+  bar.addEventListener("pointercancel", up);
+});
+
+function showSidePage(i, n) {
+  const name = side.viewer?.doc?.pages[i]?.name;
+  sideEl.querySelector(".side-page").textContent = name && cfg.pageLabels !== "number" ? (cfg.pageLabels === "name" ? name : `${name} · ${i + 1} / ${n}`) : `${i + 1} / ${n}`;
+}
+
+async function openSide(path) {
+  closePopover();
+  path = path || (await host.pickFile());
+  if (!path) return;
+  if (!side.engine) {
+    side.engine = new Engine(new URL("./worker.js", import.meta.url), 2);
+    side.viewer = new Viewer($("#viewer2"), side.engine, {
+      onPage: (i, n) => showSidePage(i, n),
+      onSnip: (s) => snipFrom(side.engine, s),
+      onCopy: (t) => copyText(t),
+      onError: (m) => toast(m, "error"),
+      onInfo: (m) => toast(m),
+    });
+    side.viewer.setStyle("pen", { pressure: false });
+    side.viewer.wheelZooms = cfg.wheel === "zoom";
+  }
+  const gen = ++side.gen;
+  side.viewer.close();
+  side.engine.close();
+  side.path = path;
+  cfg.sidePath = path;
+  saveCfg();
+  sideEl.hidden = false;
+  appEl.classList.add("split");
+  sideLayout();
+  sideEl.querySelector(".side-name").textContent = baseName(path).replace(/\.pdf$/i, "");
+  sideEl.querySelector(".side-name").title = path;
+  sideEl.querySelector(".side-page").textContent = "";
+  try {
+    let st = null;
+    try { st = await host.stat(path); } catch {}
+    const url = host.fileUrl(path);
+    let res = await side.engine.open(url, null, st?.size || 0);
+    while (res.needsPassword) {
+      const pw = await dialog({ title: "Password required", message: `“${baseName(path)}” is protected. Enter its password:`, input: { type: "password" }, buttons: [{ id: "cancel", label: "Cancel" }, { id: "ok", label: "Open", primary: true }] });
+      if (pw == null || pw === "cancel") throw new Error("cancelled");
+      res = await side.engine.open(url, pw, st?.size || 0);
+    }
+    if (gen !== side.gen) return;
+    if (!res.pages.length) throw new Error("this PDF has no pages");
+    side.viewer.open(gen, res.pages, { mode: "width" });
+    setSideTool(side.tool === "snip" ? "snip" : "hand");
+    side.active = true;
+  } catch (err) {
+    if (gen !== side.gen) return;
+    if (err.message !== "cancelled") toast(`Couldn't open “${baseName(path)}” side by side: ${err.message}`, "error");
+    closeSide();
+  }
+}
+
+function closeSide() {
+  side.gen++;
+  if (side.engine) {
+    side.viewer.close();
+    side.engine.destroy();
+    // A fresh element for the next one (drops the old view's listeners).
+    const old = $("#viewer2"), fresh = document.createElement("div");
+    fresh.id = "viewer2";
+    old.replaceWith(fresh);
+  }
+  side.engine = side.viewer = side.path = null;
+  side.active = false;
+  cfg.sidePath = null;
+  saveCfg();
+  sideEl.hidden = true;
+  appEl.classList.remove("split", "split-v");
+}
+
+// Swap the two PDFs (the one on the left is the one you edit).
+async function swapSides() {
+  const a = state.path, b = side.path;
+  if (!b) return;
+  if (!a) { closeSide(); openFile(b); return; }
+  await openFile(b);
+  if (state.path === b) openSide(a);
+}
+
 // ------------------------------------------------------------------ merging
 const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, "");
 const sepOf = (p) => (p.includes("\\") ? "\\" : "/");
@@ -1244,6 +1497,7 @@ function fileMenu(at, p, isFile, picks) {
   } else if (isFile) {
     showMenu(at, [
       { label: "Open", run: () => openFile(p) },
+      { label: "Open side by side", icon: "pages", run: () => openSide(p) },
       { label: "Select for merging", icon: "check", run: () => sidebar.startPicking(p) },
       state.path && { label: "Insert into the open PDF…", icon: "filePlus", run: () => insertPagesDialog(p) },
       "-",
@@ -1507,7 +1761,9 @@ function stepFile(dir) {
 pagePill.onclick = () => {
   if (!viewer.pageCount || pagePill.querySelector("input")) return;
   const n = viewer.pageCount;
-  pagePill.innerHTML = `<input type="number" min="1" max="${n}" value="${viewer.currentPage() + 1}"> / ${n}`;
+  // A page number, or a page's name ("A-101").
+  const named = viewer.doc.pages.some((p) => p.name);
+  pagePill.innerHTML = `<input type="text" inputmode="${named ? "text" : "numeric"}" autocomplete="off" value="${viewer.currentPage() + 1}"> / ${n}`;
   const inp = pagePill.querySelector("input");
   inp.focus();
   inp.select();
@@ -1515,9 +1771,16 @@ pagePill.onclick = () => {
   const finish = (go) => {
     if (closed) return;
     closed = true;
-    const v = parseInt(inp.value, 10);
-    pagePill.textContent = `${viewer.currentPage() + 1} / ${n}`;
-    if (go && v >= 1 && v <= n) viewer.goToPage(v - 1);
+    const t = inp.value.trim(), v = /^\d+$/.test(t) ? parseInt(t, 10) : NaN;
+    let target = v >= 1 && v <= n ? v - 1 : -1;
+    if (target < 0 && t) {
+      const low = t.toLowerCase(), P = viewer.doc.pages;
+      target = P.findIndex((p) => (p.name || "").toLowerCase() === low);
+      if (target < 0) target = P.findIndex((p) => (p.name || "").toLowerCase().includes(low));
+    }
+    showPagePill(viewer.currentPage(), n);
+    if (go && target >= 0) viewer.goToPage(target);
+    else if (go && t) toast(`No page “${t}”`, "error");
   };
   inp.onkeydown = (e) => { if (e.key === "Enter") finish(true); else if (e.key === "Escape") finish(false); e.stopPropagation(); };
   inp.onblur = () => finish(false);
@@ -1568,8 +1831,10 @@ function placeLastSig() {
   const last = sigLib.find((x) => x.id === cfg.lastSig) || sigLib[0];
   if (last) placeSig(last); else openSignPanel();
 }
-const vh = () => viewer.vh;
-const wide = () => viewer.L && viewer.L.worldW > viewer.vw;
+// Keys that move around act on the view used last (the side-by-side one too).
+const nv = () => (side.viewer && side.active && side.path ? side.viewer : viewer);
+const vh = () => nv().vh;
+const wide = () => { const v = nv(); return v.L && v.L.worldW > v.vw; };
 
 const COMMANDS = [
   // File
@@ -1598,6 +1863,7 @@ const COMMANDS = [
   { id: "edit.undo", group: "Edit", label: "Undo", keys: ["Ctrl+Z"], run: () => undo() },
   { id: "edit.redo", group: "Edit", label: "Redo", keys: ["Ctrl+Y", "Ctrl+Shift+Z"], run: () => redo() },
   { id: "edit.copy", group: "Edit", label: "Copy selected text", keys: ["Ctrl+C"], when: () => viewer.hasSelection, run: () => copyText(viewer.sel.text) },
+  { id: "edit.paste", group: "Edit", label: "Paste a picture (at the same size)", keys: ["Ctrl+V"], when: hasDoc, run: () => paste() },
   { id: "edit.selectAll", group: "Edit", label: "Select all text on the page", keys: ["Ctrl+A"], when: hasDoc, run: () => { if (cfg.tool !== "select") setTool("select"); viewer.selectAllOnPage(); } },
   { id: "edit.editText", group: "Edit", label: "Edit the selected text box or callout", keys: ["Enter", "F2"], when: () => ["text", "callout"].includes(viewer.selectedShape), run: () => viewer.editSelectedText() },
   { id: "edit.delete", group: "Edit", label: "Delete the selected markup or signature", keys: ["Delete", "Backspace"], when: () => !!viewer.selectedShape || viewer.placingExisting, run: () => (viewer.placingExisting ? viewer.finishPlacing("delete") : viewer.deleteSelectedShape()) },
@@ -1611,6 +1877,7 @@ const COMMANDS = [
   { id: "tool.eraser", group: "Tools", label: "Eraser", keys: ["E"], run: () => setTool("eraser") },
   { id: "tool.measure", group: "Tools", label: "Measure", keys: ["R"], run: () => setTool("measure") },
   { id: "tool.content", group: "Tools", label: "Edit content tool", keys: ["X"], run: () => setTool("content") },
+  { id: "tool.snip", group: "Tools", label: "Snip: copy an area as a picture", keys: ["C"], run: () => setTool("snip") },
   { id: "tool.touch", group: "Tools", label: "Finger draws on / off", keys: ["T"], run: () => setTouchDraws(!cfg.touchDraws) },
   { id: "tool.menu", group: "Tools", label: "Colour and size menu for the current tool", keys: [], run: () => openToolMenu() },
   // Shapes
@@ -1626,24 +1893,27 @@ const COMMANDS = [
   { id: "measure.scale", group: "Measure", label: "Drawing scale…", keys: [], when: hasDoc, run: () => scaleDialog() },
   { id: "measure.calibrate", group: "Measure", label: "Calibrate the scale", keys: [], when: hasDoc, run: () => { setTool("measure"); viewer.startCalibrate(); } },
   // View
-  { id: "view.zoomIn", group: "View", label: "Zoom in", keys: ["Ctrl+=", "Ctrl+Shift+=", "Ctrl++"], repeat: true, run: () => viewer.zoomBy(1.25) },
-  { id: "view.zoomOut", group: "View", label: "Zoom out", keys: ["Ctrl+-"], repeat: true, run: () => viewer.zoomBy(0.8) },
-  { id: "view.fitWidth", group: "View", label: "Fit width", keys: ["Ctrl+0"], run: () => viewer.fit("width") },
-  { id: "view.fitPage", group: "View", label: "Fit page", keys: ["Ctrl+9"], run: () => viewer.fit("page") },
-  { id: "view.actual", group: "View", label: "Actual size (100%)", keys: ["Ctrl+1"], run: () => viewer.setZoom(96 / 72) },
+  { id: "view.zoomIn", group: "View", label: "Zoom in", keys: ["Ctrl+=", "Ctrl+Shift+=", "Ctrl++"], repeat: true, run: () => nv().zoomBy(1.25) },
+  { id: "view.zoomOut", group: "View", label: "Zoom out", keys: ["Ctrl+-"], repeat: true, run: () => nv().zoomBy(0.8) },
+  { id: "view.fitWidth", group: "View", label: "Fit width", keys: ["Ctrl+0"], run: () => nv().fit("width") },
+  { id: "view.fitPage", group: "View", label: "Fit page", keys: ["Ctrl+9"], run: () => nv().fit("page") },
+  { id: "view.actual", group: "View", label: "Actual size (100%)", keys: ["Ctrl+1"], run: () => nv().setZoom(96 / 72) },
   { id: "view.fullscreen", group: "View", label: "Full screen", keys: ["F11"], typing: true, run: () => host.toggleFullscreen() },
+  { id: "view.side", group: "View", label: "Open a PDF side by side…", keys: ["Ctrl+Shift+O"], typing: true, run: () => openSide(null) },
+  { id: "view.sideSwap", group: "View", label: "Swap the side-by-side PDFs", keys: [], when: () => !!side.path, run: () => swapSides() },
+  { id: "view.sideClose", group: "View", label: "Close the side-by-side PDF", keys: [], when: () => !!side.path, run: () => closeSide() },
   { id: "view.wheel", group: "View", label: "Switch the mouse wheel between scroll and zoom", keys: [], run: () => setWheel(cfg.wheel === "zoom" ? "scroll" : "zoom") },
   // Navigate
-  { id: "nav.down", group: "Navigate", label: "Scroll down", keys: ["ArrowDown"], repeat: true, run: () => viewer.scrollBy(0, 60) },
-  { id: "nav.up", group: "Navigate", label: "Scroll up", keys: ["ArrowUp"], repeat: true, run: () => viewer.scrollBy(0, -60) },
-  { id: "nav.right", group: "Navigate", label: "Scroll right (or next page)", keys: ["ArrowRight"], repeat: true, run: () => (wide() ? viewer.scrollBy(60, 0) : viewer.pageStep(1)) },
-  { id: "nav.left", group: "Navigate", label: "Scroll left (or previous page)", keys: ["ArrowLeft"], repeat: true, run: () => (wide() ? viewer.scrollBy(-60, 0) : viewer.pageStep(-1)) },
-  { id: "nav.screenDown", group: "Navigate", label: "Down a screen", keys: ["PageDown", "Space"], repeat: true, run: () => viewer.scrollBy(0, vh() * 0.9) },
-  { id: "nav.screenUp", group: "Navigate", label: "Up a screen", keys: ["PageUp", "Shift+Space"], repeat: true, run: () => viewer.scrollBy(0, -vh() * 0.9) },
-  { id: "nav.nextPage", group: "Navigate", label: "Next page", keys: [], repeat: true, run: () => viewer.pageStep(1) },
-  { id: "nav.prevPage", group: "Navigate", label: "Previous page", keys: [], repeat: true, run: () => viewer.pageStep(-1) },
-  { id: "nav.first", group: "Navigate", label: "First page", keys: ["Home"], run: () => viewer.goToPage(0) },
-  { id: "nav.last", group: "Navigate", label: "Last page", keys: ["End"], run: () => viewer.goToPage(viewer.pageCount - 1) },
+  { id: "nav.down", group: "Navigate", label: "Scroll down", keys: ["ArrowDown"], repeat: true, run: () => nv().scrollBy(0, 60) },
+  { id: "nav.up", group: "Navigate", label: "Scroll up", keys: ["ArrowUp"], repeat: true, run: () => nv().scrollBy(0, -60) },
+  { id: "nav.right", group: "Navigate", label: "Scroll right (or next page)", keys: ["ArrowRight"], repeat: true, run: () => (wide() ? nv().scrollBy(60, 0) : nv().pageStep(1)) },
+  { id: "nav.left", group: "Navigate", label: "Scroll left (or previous page)", keys: ["ArrowLeft"], repeat: true, run: () => (wide() ? nv().scrollBy(-60, 0) : nv().pageStep(-1)) },
+  { id: "nav.screenDown", group: "Navigate", label: "Down a screen", keys: ["PageDown", "Space"], repeat: true, run: () => nv().scrollBy(0, vh() * 0.9) },
+  { id: "nav.screenUp", group: "Navigate", label: "Up a screen", keys: ["PageUp", "Shift+Space"], repeat: true, run: () => nv().scrollBy(0, -vh() * 0.9) },
+  { id: "nav.nextPage", group: "Navigate", label: "Next page", keys: [], repeat: true, run: () => nv().pageStep(1) },
+  { id: "nav.prevPage", group: "Navigate", label: "Previous page", keys: [], repeat: true, run: () => nv().pageStep(-1) },
+  { id: "nav.first", group: "Navigate", label: "First page", keys: ["Home"], run: () => nv().goToPage(0) },
+  { id: "nav.last", group: "Navigate", label: "Last page", keys: ["End"], run: () => nv().goToPage(nv().pageCount - 1) },
   { id: "nav.goto", group: "Navigate", label: "Go to page…", keys: ["Ctrl+G"], when: hasDoc, run: () => pagePill.onclick() },
   // Help
   { id: "help.help", group: "Help", label: "Keyboard, touch and pen help", keys: ["F1"], typing: true, run: () => showHelp() },
@@ -1694,6 +1964,7 @@ const TITLES = {
   "tool.pen": [".tool[data-tool=pen]", "Pen"],
   "tool.box": [".tool[data-tool=box]", "Shapes: box, line, arrow, cloud, callout, text. Tap again to choose. To move or edit a shape, use Select"],
   "tool.sign": [".tool[data-tool=sign]", "Signature: add your signature, then drag it into place; tap a placed one to move, resize or delete it"],
+  "tool.snip": [".tool[data-tool=snip]", "Snip: drag a box, or draw around something, to copy it as a picture; Ctrl+V pastes it at the same size"],
   "tool.content": [".tool[data-tool=content]", "Edit content: drag a box to erase an area of the page; tap a line of text to retype it in the same font"],
   "tool.eraser": [".tool[data-tool=eraser]", "Eraser"],
   "tool.measure": [".tool[data-tool=measure]", "Measure distance, path length and area"],
@@ -1840,6 +2111,8 @@ host.onCloseRequest(async () => {
 // ------------------------------------------------------------------ start
 appEl.classList.add("no-doc");
 toggleSidebar(cfg.sidebarOpen);
+if (!["number", "name", "both"].includes(cfg.pageLabels)) cfg.pageLabels = "both";
+pagesPanel.labelMode = cfg.pageLabels;
 togglePages(cfg.pagesOpen);
 applyStyles();
 setWheel(cfg.wheel, false);
@@ -1853,6 +2126,8 @@ if (host.platform === "web" && new URLSearchParams(location.search).get("folder"
   cfg.folder = new URLSearchParams(location.search).get("folder");
 }
 if (cfg.folder) loadFolder(cfg.folder, true);
+if (typeof cfg.sideFrac === "number") setSideFrac(cfg.sideFrac);
+if (cfg.sidePath) host.stat(cfg.sidePath).then((st) => { if (st && !side.path) openSide(cfg.sidePath); }).catch(() => {});
 else sidebar.setRoot(null), sidebar.setTree(null);
 if (startFile) {
   const st = await host.stat(startFile).catch(() => null);
@@ -1861,4 +2136,4 @@ if (startFile) {
 if (!state.path) $("#empty-msg").textContent = cfg.folder ? "Pick a PDF from the list on the left." : "Open a folder to see every PDF inside it, including subfolders.";
 
 // Expose for automated tests.
-window.__inkleaf = { viewer, engine, sidebar, state, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib };
+window.__inkleaf = { viewer, engine, sidebar, side, state, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib };

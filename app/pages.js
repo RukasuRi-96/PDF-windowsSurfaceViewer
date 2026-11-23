@@ -1,5 +1,8 @@
 // Pages panel: a thumbnail of every page, to select, delete, add, copy in,
-// duplicate, rotate and drag pages into a new order.
+// duplicate, rotate and drag pages into a new order (mouse and pen drag;
+// a finger presses and holds a page to lift it). The page being read is
+// highlighted; pages show their number, their name (the PDF's page label or
+// bookmark), or both.
 //
 // Speed: only the thumbnails in (or near) view exist; they are rendered at
 // thumbnail size by the render workers only after the page view's own tiles,
@@ -23,10 +26,12 @@ export class PagesPanel {
     this.cache = new Map();   // page -> canvas
     this.items = new Map();   // page -> element
     this.gen = 0;
+    this.labelMode = "both"; // number | name | both
     root.tabIndex = -1;
     root.innerHTML = `
       <div class="pp-head">
         <span class="pp-title">Pages <span class="pp-count"></span></span>
+        <button class="btn icon-btn" data-act="labels" title="Show page numbers, names or both">${icon("tag")}</button>
         <button class="btn icon-btn" data-act="add" title="Add pages">${icon("filePlus")}</button>
         <button class="btn icon-btn" data-act="delete" title="Delete the selected pages (Delete)">${icon("trash")}</button>
         <button class="btn icon-btn" data-act="close" title="Hide pages">${icon("x")}</button>
@@ -40,14 +45,18 @@ export class PagesPanel {
       const b = e.target.closest("[data-act]");
       if (!b) return;
       if (b.dataset.act === "add") cb.onAddMenu?.(b, this.insertAt());
+      else if (b.dataset.act === "labels") cb.onLabelsMenu?.(b);
       else if (b.dataset.act === "delete") cb.onDelete?.(this.selected());
       else if (b.dataset.act === "close") cb.onClose?.();
     });
     this.list.addEventListener("scroll", () => this._schedule());
     new ResizeObserver(() => this._schedule()).observe(this.list);
     this.list.addEventListener("pointerdown", (e) => this._down(e));
+    // While a finger holds a page to move it, the list must not scroll.
+    this.list.addEventListener("touchmove", (e) => { if (this.drag || this._hold) e.preventDefault(); }, { passive: false });
     this.list.addEventListener("contextmenu", (e) => {
       e.preventDefault();
+      if (performance.now() - (this._touchAt || -1e9) < 1500) return; // touch: handled by press and hold
       const i = this._indexAt(e);
       if (i < 0) return;
       if (!this.sel.has(i)) this._select(i, {});
@@ -77,21 +86,38 @@ export class PagesPanel {
     this.sel = new Set((select || [this.current]).filter((i) => i >= 0 && i < this.pages.length));
     this.anchor = this.current;
     this.countEl.textContent = this.pages.length ? `(${this.pages.length})` : "";
+    this.hasNames = this.pages.some((p) => p.name);
     this._layout();
     if (this.open) { this._render(); this.reveal(this.current, true); }
   }
 
   clear() { this.setDocument([], 0); }
 
-  // The page view moved to page i.
+  // The page view moved to page i: highlight it (a single selection follows
+  // along; several selected pages stay selected).
   setCurrent(i) {
     if (i === this.current) return;
     const old = this.items.get(this.current);
     old?.classList.remove("current");
     this.current = i;
     this.items.get(i)?.classList.add("current");
+    if (this.sel.size <= 1 && !this.drag) { this.sel = new Set([i]); this.anchor = i; this._paintSel(); }
     if (this.open && !this.drag) this.reveal(i);
   }
+
+  // "3", "A-101" or "3 · A-101".
+  labelOf(i) {
+    const name = this.pages[i]?.name || "";
+    if (!name || this.labelMode === "number") return String(i + 1);
+    return this.labelMode === "name" ? name : `${i + 1} · ${name}`;
+  }
+
+  setLabelMode(mode) {
+    this.labelMode = mode;
+    for (const [i, el] of this.items) { const l = el.querySelector(".pp-num"); l.textContent = this.labelOf(i); l.title = this._fullLabel(i); }
+  }
+
+  _fullLabel(i) { const n = this.pages[i]?.name; return n ? `Page ${i + 1}: ${n}` : `Page ${i + 1}`; }
 
   selected() { return [...this.sel].sort((a, b) => a - b); }
 
@@ -177,7 +203,8 @@ export class PagesPanel {
     if (cv) box.appendChild(cv);
     const label = document.createElement("div");
     label.className = "pp-num";
-    label.textContent = i + 1;
+    label.textContent = this.labelOf(i);
+    label.title = this._fullLabel(i);
     el.append(box, label);
     this.inner.appendChild(el);
     this.items.set(i, el);
@@ -225,29 +252,51 @@ export class PagesPanel {
   }
 
   // ---- pointer: click selects (and shows the page); mouse/pen drag moves
-  // pages; a finger scrolls the list (press and hold for the menu).
+  // pages; a finger scrolls the list, or presses and holds a page to lift it
+  // and move it (letting go without moving opens the page menu).
   _down(e) {
     if (e.button !== 0) return;
     const i = this._indexAt(e);
     if (i < 0) return;
     this.root.focus({ preventScroll: true });
+    const touch = e.pointerType === "touch";
     const x0 = e.clientX, y0 = e.clientY;
-    let moved = false;
+    let moved = false, held = false, last = e;
+    if (touch) {
+      this._touchAt = performance.now();
+      this._holdTimer = setTimeout(() => {
+        if (moved) return;
+        held = true;
+        this._hold = true;
+        this.items.get(i)?.classList.add("lifted");
+        if (navigator.vibrate) { try { navigator.vibrate(15); } catch {} }
+      }, 380);
+    }
     const move = (ev) => {
       if (ev.pointerId !== e.pointerId) return;
-      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 6) {
+      last = ev;
+      const far = Math.hypot(ev.clientX - x0, ev.clientY - y0) > (touch ? 8 : 6);
+      if (!moved && far) {
         moved = true;
-        if (e.pointerType !== "touch") this._startDrag(i, e);
+        clearTimeout(this._holdTimer);
+        if (!touch || held) this._startDrag(i, e);
       }
       if (this.drag) this._dragMove(ev);
     };
     const up = (ev) => {
       if (ev.pointerId !== e.pointerId) return;
+      clearTimeout(this._holdTimer);
+      this._hold = false;
+      this.items.get(i)?.classList.remove("lifted");
       this.list.removeEventListener("pointermove", move);
       this.list.removeEventListener("pointerup", up);
       this.list.removeEventListener("pointercancel", up);
       if (this.drag) { this._dragEnd(ev.type === "pointercancel"); return; }
-      if (!moved && ev.type === "pointerup") {
+      if (ev.type !== "pointerup") return;
+      if (held && !moved) {
+        if (!this.sel.has(i)) this._select(i, {});
+        this.cb.onMenu?.(i, last.clientX, last.clientY);
+      } else if (!moved) {
         this._select(i, e);
         if (!e.shiftKey && !e.ctrlKey && !e.metaKey) this.cb.onGo?.(i);
       }

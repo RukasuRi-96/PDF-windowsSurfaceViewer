@@ -91,7 +91,7 @@ export class Engine {
     const pages = [];
     const b = info.bounds;
     for (let i = 0; i < info.pageCount; i++) {
-      pages.push({ x0: b[i * 4], y0: b[i * 4 + 1], x1: b[i * 4 + 2], y1: b[i * 4 + 3] });
+      pages.push({ x0: b[i * 4], y0: b[i * 4 + 1], x1: b[i * 4 + 2], y1: b[i * 4 + 3], name: info.names ? info.names[i] : "" });
     }
     return { pages, needsPassword: false };
   }
@@ -100,6 +100,8 @@ export class Engine {
   // `before` is the document as it was (bytes), for undo.
   pageOp(op) { return this._edit(() => this.edit.call("pages", { op })).then((r) => this._structure(r)); }
   restore(bytes) { return this._edit(() => this.edit.call("restore", { bytes }, [bytes.buffer])).then((r) => this._structure(r)); }
+  // An area of a page as a PNG ({ png, w, h }), markups included.
+  snip(page, rect, res) { return this._edit(() => this.edit.call("snip", { page, rect, res })); }
   countPagesOf(url, password) { return this.edit.call("countPagesOf", { url, password }); }
   // Merging reads other files only, so it isn't tied to the open document.
   merge(files) { return this.edit.call("merge", { files }); }
@@ -124,7 +126,7 @@ export class Engine {
       }).catch((err) => console.warn("reopen failed", err));
     }
     const b = r.bounds, pages = [];
-    for (let i = 0; i < r.pageCount; i++) pages.push({ x0: b[i * 4], y0: b[i * 4 + 1], x1: b[i * 4 + 2], y1: b[i * 4 + 3] });
+    for (let i = 0; i < r.pageCount; i++) pages.push({ x0: b[i * 4], y0: b[i * 4 + 1], x1: b[i * 4 + 2], y1: b[i * 4 + 3], name: r.names ? r.names[i] : "" });
     return { pages, before: r.before };
   }
 
@@ -132,6 +134,15 @@ export class Engine {
   setThumbQueue(tasks) {
     this.thumbQueue = tasks.filter((t) => !this.inFlight.has(t.key));
     this._pump();
+  }
+
+  // Stop every worker (a second document closed for good).
+  destroy() {
+    this.gen++;
+    this.queue = [];
+    this.thumbQueue = [];
+    this.activeRenderers = [];
+    for (const w of [this.edit, ...this.renderers]) { try { w.worker.terminate(); } catch {} }
   }
 
   close() {
