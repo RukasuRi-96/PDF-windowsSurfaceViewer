@@ -158,13 +158,36 @@ const MM = 72 / 25.4;
   await p2.click('.menu button:has-text("Update to version 9.9.9")');
   await p2.waitForSelector('.dialog:has-text("Update to version 9.9.9?")');
   const notes = await p2.textContent('.dialog .upd-notes');
+  const tick = await p2.evaluate(() => { const r = document.querySelector('#upd-auto').getBoundingClientRect(), l = document.querySelector('.upd-auto').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), left: Math.round(r.left - l.left) }; });
+  await p2.screenshot({ path: SP + '/upd-dialog.png' });
   await p2.click('.dialog .btn:has-text("Update now")');
   await p2.waitForSelector('.dialog:has-text("The update is ready")', { timeout: 15000 });
   await p2.click('.dialog .btn:has-text("When I close the app")');
   await p2.waitForTimeout(300);
   const staged = require('fs').existsSync(SP + '/ud/update/app-9.9.9.asar') && require('fs').readFileSync(SP + '/ud/update/app-9.9.9.asar').equals(newApp);
-  console.log('update: found at start', badge, '· notes', JSON.stringify(notes.trim()), '· downloaded, checked and unpacked', staged, '· version shown', await p2.evaluate(() => window.inkleaf.version));
+  console.log('update: found at start', badge, '· notes', JSON.stringify(notes.trim()), '· tick box', tick.w + 'x' + tick.h, 'at the left', tick.left <= 2, '· downloaded, checked and unpacked', staged, '· version shown', await p2.evaluate(() => window.inkleaf.version));
   await app2.close();
+  // The next start says whether an update took. Not installed: the log of
+  // that attempt and the installer offered.
+  const ud = SP + '/ud', ver = require(R + '/package.json').version;
+  fs0.writeFileSync(ud + '/update-pending.json', JSON.stringify({ version: '9.9.9', from: ver, kind: 'app', token: 'feedbeef0001', at: Date.now() }));
+  fs0.appendFileSync(ud + '/update.log', '2026-01-01 10:00:00  started feedbeef0001: installing version 9.9.9\r\n2026-01-01 10:00:03  could not replace the app: The process cannot access the file\r\n');
+  const app3 = await launch();
+  const p3 = await app3.firstWindow();
+  await p3.waitForSelector('.dialog:has-text("The update didn\'t install")', { timeout: 15000 });
+  const failLog = await p3.textContent('.dialog .upd-log');
+  const failBtn = await p3.isVisible('.dialog .btn.primary:has-text("Get the installer")');
+  await p3.screenshot({ path: SP + '/upd-failed.png' });
+  await p3.click('.dialog .btn:has-text("Close")');
+  console.log('update not installed: told at the next start, with what happened', /started feedbeef0001/.test(failLog) && /could not replace the app/.test(failLog), '· the installer offered', failBtn, '· asked once', !fs0.existsSync(ud + '/update-pending.json'));
+  await app3.close();
+  // Installed: a short message.
+  fs0.writeFileSync(ud + '/update-pending.json', JSON.stringify({ version: ver, from: '1.10.2', kind: 'app', token: 'feedbeef0002', at: Date.now() }));
+  const app4 = await launch();
+  const p4 = await app4.firstWindow();
+  const okToast = await p4.waitForSelector(`.toast:has-text("updated to version ${ver}")`, { timeout: 15000 }).then(() => true, () => false);
+  console.log('update installed: told at the next start', okToast);
+  await app4.close();
   feedSrv.close();
   console.log(logs.length ? logs.join('\n') : 'no errors');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

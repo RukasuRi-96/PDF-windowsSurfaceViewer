@@ -2189,12 +2189,38 @@ async function readyDialog(v) {
 }
 
 async function restartToUpdate() {
+  const v = updateInfo?.latest;
   for (const P of panes.slice()) if (!(await confirmDiscard(P))) return;
   for (const P of panes) storeView(P);
   saveSession();
   await saveCfg(true);
+  // The app closes once the installer helper is running (a few seconds).
+  showUpdateStatus("Installing the update… the app restarts by itself");
   const r = await host.installUpdate(true);
-  if (!r || !r.ok) toast("Couldn't install the update: " + (r?.error || "unknown problem"), "error");
+  if (r && r.ok) return;
+  showUpdateStatus(null);
+  updateFailedDialog(v, [r?.error ? "Problem: " + r.error : "The update couldn't start."]);
+}
+
+// The update couldn't install itself: say so, show the log, and offer the
+// installer (which keeps settings, signatures and shortcuts too).
+async function updateFailedDialog(v, log = []) {
+  const res = await dialog({
+    title: "The update didn't install",
+    html: `<p>Version ${esc(v || "")} couldn't install itself, so you still have version ${esc(host.version || "")}. Nothing was changed. ` +
+      `You can install it with the installer instead: download EaglesPDF-Setup.zip, extract it and double-click <b>Install Eagles PDF viewer</b>. Your settings, signatures, shortcuts and PDFs are kept.</p>` +
+      (log.length ? `<div class="hint">What happened:</div><pre class="upd-log">${esc(log.join("\n"))}</pre>` : ""),
+    buttons: [{ id: "close", label: "Close" }, { id: "dl", label: "Get the installer", primary: true }],
+  });
+  if (res === "dl") host.openDownloadPage?.();
+}
+
+// After a restart: did the update take?
+async function reportUpdateResult() {
+  const r = await host.updateResult?.();
+  if (!r) return;
+  if (r.updated) toast(`Eagles PDF viewer was updated to version ${r.updated}`);
+  else if (r.failed) updateFailedDialog(r.failed, r.log || []);
 }
 
 // ------------------------------------------------------------------ toolbar (ribbon)
@@ -2990,6 +3016,7 @@ else { sidebar.setRoot(null); sidebar.setTree(null); }
   }
 }
 
+if (canUpdate) setTimeout(reportUpdateResult, 1500);
 if (canUpdate && cfg.autoUpdate !== false) {
   setTimeout(() => checkForUpdates({ quiet: true }), 6000);
   setInterval(() => checkForUpdates({ quiet: true }), 6 * 3600e3);

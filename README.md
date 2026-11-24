@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.11.0** · Windows 10 or 11, 64-bit
+**Current version: 1.11.1** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -43,15 +43,19 @@ Right-click any PDF in File Explorer and choose **Open with**, then **Choose ano
 
 From version 1.10.0 the app **updates itself**:
 
+> **On 1.10.x?** Those versions download updates but can't install them: after **Restart now** the app closes and doesn't come back. Install 1.11.1 or later once by hand (below); from then on updates install themselves.
+
+
 - A few seconds after it starts (and every few hours), it looks for a new version. When there is one, a message says so and a dot appears on the **⋯** button.
 - Click **Update…** on the message, or **⋯ → Update to version …**, to see what's new and choose **Update now**. You can also check yourself any time with **⋯ → Check for updates**.
 - The update is downloaded (usually about 5 MB) and checked against its SHA-256 fingerprint. Then choose **Restart now**, or **When I close the app** to have it installed when you close Eagles. It reopens by itself after a restart.
 - Your settings, signatures, shortcuts, toolbar and open PDFs are kept. If a future version needs a new app runtime, the installer window opens to finish the update.
+- The app closes only once its installer helper is running, and the next start says whether the update took. If an update ever can't install itself, a message says so, shows what happened, and offers the installer (**Get the installer**). Nothing is changed in that case.
 - To stop it looking by itself, untick **Look for updates automatically** in the update window.
 
 Updates come from this repository's [`downloads`](downloads) folder: [`latest.json`](downloads/latest.json) names the newest version and its fingerprint, and the installer zip it points to holds the app.
 
-Before 1.10.0, or to reinstall: download the new `EaglesPDF-Setup.zip` and run its **Install Eagles PDF viewer** the same way. Your settings, drawing scales and last-opened file are kept.
+Before 1.11.1, or to reinstall: download the new `EaglesPDF-Setup.zip` and run its **Install Eagles PDF viewer** the same way. Your settings, drawing scales and last-opened file are kept.
 
 ### Uninstall
 
@@ -423,7 +427,7 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 | `app/markups.js` | The markups list: per open PDF, summaries read from the edit worker a few dozen pages at a time, only while the list is showing; after an edit only the pages that changed are read again. |
 | `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), the current-page highlight, page names, selection, drag (grip, or press and hold) to reorder or onto another open PDF to copy. It follows the PDF in use and keeps each open PDF's thumbnails. |
 | `app/inkgeom.js` | Pressure strokes: width from pen pressure and the stroke's outline, shared by the viewer and the engine. |
-| `electron/updater.js` | Automatic updates: reads `downloads/latest.json` from this repository, downloads the installer zip and checks its SHA-256, takes the app (`files/app.asar`) out of it (or, for a new Electron runtime, runs the installer), and swaps `resources\app.asar` with a small PowerShell script once the app has closed. |
+| `electron/updater.js` | Automatic updates: reads `downloads/latest.json` from this repository, downloads the installer zip and checks its SHA-256, takes the app (`files/app.asar`) out of it (or, for a new Electron runtime, runs the installer), and swaps `resources\app.asar` with a small PowerShell helper once the app has closed. The helper is started through a short-lived PowerShell (`Start-Process`), so it isn't tied to the app; the app closes only after the helper has written `started <token>` to `update.log` (in the app's data folder), every step is logged there, and the next start reports whether the update took (`update-pending.json`). |
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
 | `app/main.js` | Toolbar (customizable, sized to fit), dialogs, shortcuts, settings, scales, the open/save flow and autosave, snip, copy and paste, search, and the open PDFs (panes) side by side. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |

@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld("inkleaf", {
   onUpdateProgress: on("update-progress"),
   installUpdate: (relaunch) => ipcRenderer.invoke("update-install", relaunch),
   installUpdateOnQuit: () => ipcRenderer.invoke("update-on-quit"),
+  updateResult: () => ipcRenderer.invoke("update-result"),
+  openDownloadPage: () => ipcRenderer.invoke("update-open-download"),
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || null; } catch { return null; }
   },

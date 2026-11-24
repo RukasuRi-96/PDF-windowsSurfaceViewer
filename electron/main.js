@@ -190,13 +190,18 @@ ipcMain.handle("copy-text", (_e, text) => { clipboard.writeText(String(text ?? "
 const safe = (fn) => async (...a) => { try { return await fn(...a); } catch (err) { return { ok: false, error: err.message || String(err) }; } };
 ipcMain.handle("update-check", safe(() => updater.check()));
 ipcMain.handle("update-download", safe((e) => updater.download((p) => { try { e.sender.send("update-progress", p); } catch {} })));
-ipcMain.handle("update-install", safe((_e, relaunch) => {
-  const r = updater.install(!!relaunch);
+ipcMain.handle("update-install", safe(async (_e, relaunch) => {
+  // Closes only once the helper that installs it is running.
+  const r = await updater.install(!!relaunch);
   // The UI has already saved or asked about unsaved changes.
   if (r.ok) { allowClose = true; setTimeout(() => app.quit(), 50); }
   return r;
 }));
 ipcMain.handle("update-on-quit", safe(() => updater.installOnQuit()));
+// Whether an update installed since the last run (asked once, at start).
+let updateResult;
+ipcMain.handle("update-result", () => { if (updateResult === undefined) { try { updateResult = updater.startResult(); } catch { updateResult = null; } return updateResult; } return null; });
+ipcMain.handle("update-open-download", () => shell.openExternal(updater.DOWNLOAD_PAGE));
 ipcMain.handle("watch-folder", (_e, dir) => {
   try { watcher?.close(); } catch {}
   watcher = null;
@@ -241,4 +246,11 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => app.quit());
-app.on("will-quit", () => { try { updater.finishOnQuit(); } catch {} });
+// An update chosen for "when I close the app": start its helper first.
+let installingOnQuit = false;
+app.on("will-quit", (e) => {
+  if (installingOnQuit || !updater.wantsInstallOnQuit()) return;
+  installingOnQuit = true;
+  e.preventDefault();
+  updater.finishOnQuit().catch(() => {}).finally(() => app.exit(0));
+});

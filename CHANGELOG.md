@@ -2,6 +2,12 @@
 
 The first lines under each version are shown in the app's update window.
 
+## 1.11.1
+
+- Updates install again: after Restart now, the app closes only once its installer helper is running, and reopens on the new version. (1.10.x downloaded updates but couldn't install them; install this version once with the installer.)
+- If an update ever can't install itself, the next start says so, shows what happened and offers the installer; after one that worked, a message says so.
+- The tick box in the update window is the right size again.
+
 ## 1.11.0
 
 - The Pages panel: make the pages bigger or smaller with the slider at its top, a two-finger pinch or Ctrl + mouse wheel.

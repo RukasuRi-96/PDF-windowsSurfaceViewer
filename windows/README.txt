@@ -21,6 +21,9 @@ UPDATES
   updates. The update is checked against its fingerprint first, and
   your settings, signatures and PDFs are kept. Updates come from
   github.com/RukasuRi-96/PDF-windowsSurfaceViewer.
+  If an update can't install itself, the app says so at its next start
+  and offers the installer; nothing is changed. Versions 1.10.x can't
+  install updates: install 1.11.1 or later once with the installer.
   You can also run a new "Install Eagles PDF viewer" the same way. If
   you had "Inkleaf PDF" (this app's earlier name), setup replaces it
   and keeps its settings.

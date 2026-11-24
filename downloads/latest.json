@@ -1,13 +1,21 @@
 {
-  "version": "1.11.0",
+  "version": "1.11.1",
   "electron": "44.9.3",
   "date": "2026-11-24",
   "notes": [
-    "The Pages panel: make the pages bigger or smaller with the slider at its top, a two-finger pinch or Ctrl + mouse wheel.",
-    "Drag the panel's left edge to make it wider or narrower (double-click for normal width); small pages or a wide panel show a grid of pages, which you can drag around too.",
-    "The grip for moving pages with a finger is smaller, and still easy to hit."
+    "Updates install again: after Restart now, the app closes only once its installer helper is running, and reopens on the new version. (1.10.x downloaded updates but couldn't install them; install this version once with the installer.)",
+    "If an update ever can't install itself, the next start says so, shows what happened and offers the installer; after one that worked, a message says so.",
+    "The tick box in the update window is the right size again."
   ],
   "changes": [
+    {
+      "version": "1.11.1",
+      "notes": [
+        "Updates install again: after Restart now, the app closes only once its installer helper is running, and reopens on the new version. (1.10.x downloaded updates but couldn't install them; install this version once with the installer.)",
+        "If an update ever can't install itself, the next start says so, shows what happened and offers the installer; after one that worked, a message says so.",
+        "The tick box in the update window is the right size again."
+      ]
+    },
     {
       "version": "1.11.0",
       "notes": [
@@ -81,8 +89,8 @@
     }
   ],
   "setup": {
-    "url": "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewer/main/downloads/updates/EaglesPDF-Setup-1.11.0.zip",
-    "sha256": "de4caafd1de18d88bbff90abe9fafac8386c3531f2aaf53f3c3d34c7480bf750",
-    "size": 5147832
+    "url": "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewer/main/downloads/updates/EaglesPDF-Setup-1.11.1.zip",
+    "sha256": "a34959b364875235118512f605f4102bd770688de522741eb26f6fa08e7c5f07",
+    "size": 5150839
   }
 }
