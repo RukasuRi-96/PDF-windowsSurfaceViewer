@@ -6,6 +6,7 @@ const os = require("os");
 const { Readable } = require("stream");
 const { scanFolder, writeFileSafe, stat, listImages } = require("./fsops");
 const { findFont } = require("./fontindex");
+const updater = require("./updater");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } },
@@ -139,7 +140,7 @@ app.on("second-instance", (_e, argv) => {
 
 // ---------------------------------------------------------------- IPC
 ipcMain.on("init-info", (e) => {
-  e.returnValue = { platform: process.platform, userName: safeUser(), file: initialFile };
+  e.returnValue = { platform: process.platform, userName: safeUser(), file: initialFile, version: app.getVersion() };
   initialFile = null;
 });
 ipcMain.on("close-handler", () => { closeHandlerReady = true; });
@@ -185,6 +186,17 @@ ipcMain.handle("write-json", (_e, name, value) => writeJson(name, value));
 ipcMain.handle("show-in-folder", (_e, p) => { if (p) shell.showItemInFolder(p); });
 ipcMain.handle("toggle-fullscreen", () => { if (win) win.setFullScreen(!win.isFullScreen()); });
 ipcMain.handle("copy-text", (_e, text) => { clipboard.writeText(String(text ?? "")); return true; });
+// Updates (see updater.js). Errors come back as { error } for the UI to show.
+const safe = (fn) => async (...a) => { try { return await fn(...a); } catch (err) { return { ok: false, error: err.message || String(err) }; } };
+ipcMain.handle("update-check", safe(() => updater.check()));
+ipcMain.handle("update-download", safe((e) => updater.download((p) => { try { e.sender.send("update-progress", p); } catch {} })));
+ipcMain.handle("update-install", safe((_e, relaunch) => {
+  const r = updater.install(!!relaunch);
+  // The UI has already saved or asked about unsaved changes.
+  if (r.ok) { allowClose = true; setTimeout(() => app.quit(), 50); }
+  return r;
+}));
+ipcMain.handle("update-on-quit", safe(() => updater.installOnQuit()));
 ipcMain.handle("watch-folder", (_e, dir) => {
   try { watcher?.close(); } catch {}
   watcher = null;
@@ -229,3 +241,4 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => app.quit());
+app.on("will-quit", () => { try { updater.finishOnQuit(); } catch {} });

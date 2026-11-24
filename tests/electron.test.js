@@ -3,7 +3,17 @@ const { _electron: electron } = require('playwright');
 const OLD = process.env.WORK, SP = process.env.WORK, R = require('path').join(__dirname, '..');
 const MM = 72 / 25.4;
 (async () => {
-  const launch = () => electron.launch({ executablePath: R + '/node_modules/electron/dist/electron', args: ['--no-sandbox', R], env: { ...process.env, INKLEAF_USER_DATA: SP + '/ud' } });
+  const launch = (env = {}) => electron.launch({ executablePath: R + '/node_modules/electron/dist/electron', args: ['--no-sandbox', R], env: { ...process.env, INKLEAF_USER_DATA: SP + '/ud', ...env } });
+  // A stand-in for the public releases repository: version 9.9.9 is out.
+  const zlib = require('zlib'), crypto = require('crypto');
+  const newApp = crypto.randomBytes(200000), gz = zlib.gzipSync(newApp);
+  const feedSrv = require('http').createServer((req, res) => {
+    const u = req.url.split('?')[0], base = `http://127.0.0.1:${feedSrv.address().port}`;
+    if (u === '/latest.json') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ version: '9.9.9', electron: require(R + '/node_modules/electron/package.json').version, notes: ['A test update'], app: { url: base + '/app.gz', sha256: crypto.createHash('sha256').update(gz).digest('hex'), size: gz.length } })); }
+    else if (u === '/app.gz') { res.writeHead(200, { 'content-length': gz.length }); res.end(gz); }
+    else { res.writeHead(404); res.end(); }
+  });
+  await new Promise((r) => feedSrv.listen(0, '127.0.0.1', r));
   const app = await launch();
   const page = await app.firstWindow();
   const logs = [];
@@ -55,7 +65,7 @@ const MM = 72 / 25.4;
   await page.waitForFunction(() => !window.__inkleaf.viewer.dirty, null, { timeout: 10000 });
   await page.screenshot({ path: SP + '/e3.png' });
   await app.close();
-  const app2 = await launch();
+  const app2 = await launch({ EAGLES_UPDATE_URL: `http://127.0.0.1:${feedSrv.address().port}/latest.json` });
   const p2 = await app2.firstWindow();
   await p2.waitForFunction(() => window.__inkleaf?.viewer.doc?.states.get(0)?.base, null, { timeout: 15000 });
   await p2.waitForTimeout(500);
@@ -133,6 +143,22 @@ const MM = 72 / 25.4;
   console.log('side by side:', await p2.textContent('.pane.active .pane-name'), '·', await p2.evaluate(() => window.__inkleaf.panes.every(P => P.el.getBoundingClientRect().width > 200)), '· in use:', await p2.evaluate(() => window.__inkleaf.state.path.split(/[\\/]/).pop()));
   await p2.click('.pane.active [data-act=close]');
   await p2.waitForFunction(() => window.__inkleaf.panes.length === 1);
+  // Updates: found a few seconds after start, the ⋯ menu offers it, downloaded
+  // and checked, then "When I close the app".
+  await p2.waitForFunction(() => window.__inkleaf.updateInfo?.latest === '9.9.9', null, { timeout: 20000 });
+  const badge = await p2.evaluate(() => document.querySelector('#btn-more').classList.contains('badge'));
+  await p2.keyboard.press('Escape');
+  await p2.click('#btn-more');
+  await p2.click('.menu button:has-text("Update to version 9.9.9")');
+  await p2.waitForSelector('.dialog:has-text("Update to version 9.9.9?")');
+  const notes = await p2.textContent('.dialog .upd-notes');
+  await p2.click('.dialog .btn:has-text("Update now")');
+  await p2.waitForSelector('.dialog:has-text("The update is ready")', { timeout: 15000 });
+  await p2.click('.dialog .btn:has-text("When I close the app")');
+  await p2.waitForTimeout(300);
+  const staged = require('fs').existsSync(SP + '/ud/update/app-9.9.9.asar') && require('fs').readFileSync(SP + '/ud/update/app-9.9.9.asar').equals(newApp);
+  console.log('update: found at start', badge, '· notes', JSON.stringify(notes.trim()), '· downloaded, checked and unpacked', staged, '· version shown', await p2.evaluate(() => window.inkleaf.version));
   await app2.close();
+  feedSrv.close();
   console.log(logs.length ? logs.join('\n') : 'no errors');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

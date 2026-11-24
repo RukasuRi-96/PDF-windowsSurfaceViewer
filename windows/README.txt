@@ -14,9 +14,16 @@ INSTALL
      It takes a minute or two, then Eagles PDF viewer opens by itself and is
      on your Start menu and Desktop. No admin rights are needed.
 
-  To update later, run the new "Install Eagles PDF viewer" the same way.
-  Your settings and your PDFs are kept. If you had "Inkleaf PDF" (this
-  app's earlier name), setup replaces it and keeps its settings.
+UPDATES
+  The app updates itself. When a new version is out it tells you (and
+  a dot appears on the More (...) button): choose "Update now", then
+  "Restart now" or "When I close the app". Or More (...) > Check for
+  updates. The update is checked against its fingerprint first, and
+  your settings, signatures and PDFs are kept. Updates come from
+  github.com/RukasuRi-96/EaglesPDF-releases.
+  You can also run a new "Install Eagles PDF viewer" the same way. If
+  you had "Inkleaf PDF" (this app's earlier name), setup replaces it
+  and keeps its settings.
 
   If "Install Eagles PDF viewer" is missing (some antivirus or company
   policies remove .cmd files), open the "files" folder, right-click

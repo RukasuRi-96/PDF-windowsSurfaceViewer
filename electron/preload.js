@@ -6,6 +6,7 @@ const on = (channel) => (cb) => ipcRenderer.on(channel, (_e, ...args) => cb(...a
 
 contextBridge.exposeInMainWorld("inkleaf", {
   platform: init.platform,
+  version: init.version,
   userName: init.userName,
   initialFile: init.file,
   pickFolder: () => ipcRenderer.invoke("pick-folder"),
@@ -31,6 +32,11 @@ contextBridge.exposeInMainWorld("inkleaf", {
   toggleFullscreen: () => ipcRenderer.invoke("toggle-fullscreen"),
   copyText: (text) => ipcRenderer.invoke("copy-text", text),
   findFont: (q) => ipcRenderer.invoke("find-font", q),
+  checkUpdate: () => ipcRenderer.invoke("update-check"),
+  downloadUpdate: () => ipcRenderer.invoke("update-download"),
+  onUpdateProgress: on("update-progress"),
+  installUpdate: (relaunch) => ipcRenderer.invoke("update-install", relaunch),
+  installUpdateOnQuit: () => ipcRenderer.invoke("update-on-quit"),
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || null; } catch { return null; }
   },

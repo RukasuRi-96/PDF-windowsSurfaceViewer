@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.9.1** · Windows 10 or 11, 64-bit
+**Current version: 1.10.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -41,7 +41,17 @@ Right-click any PDF in File Explorer and choose **Open with**, then **Choose ano
 
 ### Update
 
-Download the new `EaglesPDF-Setup.zip` and run its **Install Eagles PDF viewer** the same way. Your settings, drawing scales and last-opened file are kept.
+From version 1.10.0 the app **updates itself**:
+
+- A few seconds after it starts (and every few hours), it looks for a new version. When there is one, a message says so and a dot appears on the **⋯** button.
+- Click **Update…** on the message, or **⋯ → Update to version …**, to see what's new and choose **Update now**. You can also check yourself any time with **⋯ → Check for updates**.
+- The update is downloaded (usually about 5 MB) and checked against its SHA-256 fingerprint. Then choose **Restart now**, or **When I close the app** to have it installed when you close Eagles. It reopens by itself after a restart.
+- Your settings, signatures, shortcuts, toolbar and open PDFs are kept. If a future version needs a new app runtime, the installer window opens to finish the update.
+- To stop it looking by itself, untick **Look for updates automatically** in the update window.
+
+Updates come from the public repository [RukasuRi-96/EaglesPDF-releases](https://github.com/RukasuRi-96/EaglesPDF-releases), which holds only the installer and the update files (this source code stays private).
+
+Before 1.10.0, or to reinstall: download the new `EaglesPDF-Setup.zip` and run its **Install Eagles PDF viewer** the same way. Your settings, drawing scales and last-opened file are kept.
 
 ### Uninstall
 
@@ -376,6 +386,7 @@ These keys always do the same thing in their situation:
 | Problem | What to do |
 |---|---|
 | *"Windows protected your PC"* when running Setup | Click **More info**, then **Run anyway**. The app isn't code-signed. |
+| *Couldn't check for updates* | The app needs the internet and access to `raw.githubusercontent.com`. Try **⋯ → Check for updates** again later, or download the installer from [EaglesPDF-releases](https://github.com/RukasuRi-96/EaglesPDF-releases). |
 | Can't find **Install Eagles PDF viewer** after extracting | Make sure you extracted `EaglesPDF-Setup.zip` (the installer), not the repository's source-code zip. If it's still missing, use **files → setup → Run with PowerShell** as described in [Install](#install). |
 | Setup says it couldn't download, or the safety check failed | Check your internet connection and run **Install Eagles PDF viewer** again. If your network blocks github.com, use `EaglesPDF-win-x64.zip` and `Install.cmd` instead (see [Other ways to install](#other-ways-to-install)). |
 | *"Couldn't save"* | The file may be open in another app, or in a read-only or locked folder. Use **Save as…** to save a copy somewhere else. |
@@ -408,6 +419,7 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 | `app/markups.js` | The markups list: per open PDF, summaries read from the edit worker a few dozen pages at a time, only while the list is showing; after an edit only the pages that changed are read again. |
 | `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), the current-page highlight, page names, selection, drag (grip, or press and hold) to reorder or onto another open PDF to copy. It follows the PDF in use and keeps each open PDF's thumbnails. |
 | `app/inkgeom.js` | Pressure strokes: width from pen pressure and the stroke's outline, shared by the viewer and the engine. |
+| `electron/updater.js` | Automatic updates: reads `latest.json` from the public releases repository, downloads the app (or, for a new Electron runtime, the installer), checks its SHA-256, and swaps `resources\app.asar` with a small PowerShell script once the app has closed. |
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
 | `app/main.js` | Toolbar (customizable, sized to fit), dialogs, shortcuts, settings, scales, the open/save flow and autosave, snip, copy and paste, search, and the open PDFs (panes) side by side. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
@@ -465,7 +477,10 @@ The ARM build produces `dist/EaglesPDF-win-arm64.zip` only.
 
 ### Publish a version
 
-1. Raise `version` in `package.json`, run `node tools/build-win.js x64`, and copy `dist/EaglesPDF-Setup.zip` into `downloads/`. The download link at the top of this page points there.
+1. Add a `## <version>` section with a few `- ` lines to [`CHANGELOG.md`](CHANGELOG.md) (they're shown in the app's update window), and raise `version` in `package.json`.
+2. Build: `node tools/build-win.js x64`, and copy `dist/EaglesPDF-Setup.zip` into `downloads/`.
+3. Prepare the release: `node tools/release.js --keep <checkout of EaglesPDF-releases>`. It writes `dist/release/`: `latest.json` (version, notes, files and their SHA-256), `EaglesPDF-Setup.zip`, `app/<version>.asar.gz` (the app alone, for updates; the last three are kept) and the repository's `README.md`.
+4. Copy `dist/release/*` into the [EaglesPDF-releases](https://github.com/RukasuRi-96/EaglesPDF-releases) checkout (replacing what's there), commit and push. Installed apps find the new version within a few hours, or straight away with **⋯ → Check for updates**.
 2. Optional, for the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases) with both packages (the small installer and the complete 150 MB one): open the **Actions** tab, choose **Build and release**, and click **Run workflow**. GitHub builds both packages on its own servers and publishes them as a release named after the version.
 
 ### Tests

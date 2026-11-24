@@ -29,6 +29,7 @@ const cfg = Object.assign(
     pagesOpen: false,     // the panel on the right (Pages, Markups, Search)
     panelTab: "pages",
     autosave: false,      // save by itself a few seconds after changes
+    autoUpdate: true,     // look for a new version at start (installed app)
     ribbon: {},           // toolbar buttons shown or hidden (id -> bool)
     blankSize: "A4",      // last size chosen for a blank page
     pageLabels: "both",   // pages show their number, name or both
@@ -690,6 +691,8 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   { label: "Customize the toolbar…", icon: "sliders", key: keyOf("view.ribbon"), run: () => ribbonDialog() },
   { label: "Keyboard shortcuts…", icon: "keyboard", key: keyOf("help.keys"), run: () => shortcutsDialog() },
   { label: "Keyboard, touch and pen help", icon: "info", key: keyOf("help.help"), run: showHelp },
+  canUpdate && "-",
+  canUpdate && { label: updateInfo ? `Update to version ${updateInfo.latest}…` : `Check for updates (version ${host.version})`, icon: "download", run: () => (updateInfo ? updateDialog() : checkForUpdates()) },
 ]);
 
 // ------------------------------------------------------------------ popovers
@@ -2067,6 +2070,98 @@ $("#find-prev").onclick = () => findStep(-1);
 $("#find-close").onclick = () => closeFind();
 $("#find-list").onclick = () => showPanel(panelIs("find") ? null : "find");
 
+// ------------------------------------------------------------------ updates
+// The installed app looks for a new version a few seconds after it starts
+// (and every few hours), from the public releases repository. Updating
+// downloads it (checked against its fingerprint), then either restarts now
+// or installs when the app closes. Settings, signatures and shortcuts stay.
+const canUpdate = !!host.checkUpdate;
+let updateInfo = null, updateStatus = null;
+function autoUpdateBox() {
+  return `<label class="pop-check upd-auto"><input type="checkbox" id="upd-auto"${cfg.autoUpdate !== false ? " checked" : ""}> Look for updates automatically</label>`;
+}
+const readAuto = (d) => d.querySelector("#upd-auto")?.checked;
+function keepAuto(v) { if (typeof v === "boolean" && v !== (cfg.autoUpdate !== false)) { cfg.autoUpdate = v; saveCfg(); } }
+
+async function checkForUpdates({ quiet = false } = {}) {
+  if (!canUpdate) return;
+  const r = await host.checkUpdate();
+  if (!r || r.error) { if (!quiet) toast("Couldn't check for updates: " + (r?.error || "no answer") + ". Are you online?", "error"); return; }
+  if (!r.supported) {
+    if (!quiet) await dialog({ title: "Updates", message: `This is Eagles PDF viewer ${r.current}. Updates install in the installed Windows app.`, buttons: [{ id: "ok", label: "Close", primary: true }] });
+    return;
+  }
+  updateInfo = r.newer ? r : null;
+  $("#btn-more").classList.toggle("badge", !!updateInfo);
+  if (!r.newer) {
+    if (quiet) return;
+    const res = await dialog({ title: "You're up to date", message: `Eagles PDF viewer ${r.current} is the latest version.`, html: autoUpdateBox(), buttons: [{ id: "ok", label: "Close", primary: true }], collect: readAuto });
+    keepAuto(res.data);
+    return;
+  }
+  if (quiet) toast(`Eagles PDF viewer ${r.latest} is available`, "", { label: "Update…", run: () => updateDialog() });
+  else updateDialog();
+}
+
+async function updateDialog() {
+  const r = updateInfo;
+  if (!r) { checkForUpdates(); return; }
+  if (r.ready) { readyDialog(r.latest); return; }
+  const mb = r.size ? ` (${Math.max(0.1, r.size / 1e6).toFixed(1)} MB)` : "";
+  const res = await dialog({
+    title: `Update to version ${r.latest}?`,
+    html: `<p>You have version ${esc(r.current)}.${r.notes.length ? " What's new:" : ""}</p>` +
+      (r.notes.length ? `<ul class="upd-notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : "") +
+      `<p class="hint">The download${mb} is checked before it's used. Your settings, signatures, shortcuts and PDFs are kept.` +
+      (r.kind === "setup" ? " This version needs a new app runtime, so the installer window opens to finish." : "") + `</p>` + autoUpdateBox(),
+    buttons: [{ id: "later", label: "Later" }, { id: "go", label: "Update now", primary: true }],
+    collect: readAuto,
+  });
+  keepAuto(res.data);
+  if (res.id === "go") downloadUpdate();
+}
+
+function showUpdateStatus(text) {
+  if (!text) { updateStatus?.remove(); updateStatus = null; return; }
+  if (!updateStatus) {
+    updateStatus = document.createElement("div");
+    updateStatus.className = "toast upd-status";
+    updateStatus.innerHTML = icon("download") + "<span></span>";
+    $("#toasts").appendChild(updateStatus);
+  }
+  updateStatus.querySelector("span").textContent = text;
+}
+if (canUpdate) host.onUpdateProgress((p) => { if (updateStatus) showUpdateStatus(`Downloading the update… ${Math.round(p * 100)}%`); });
+
+async function downloadUpdate() {
+  const v = updateInfo.latest;
+  showUpdateStatus("Downloading the update…");
+  const d = await host.downloadUpdate();
+  showUpdateStatus(null);
+  if (!d || !d.ok) { toast("The update couldn't be downloaded: " + (d?.error || "unknown problem"), "error"); return; }
+  updateInfo.ready = true;
+  readyDialog(v);
+}
+
+async function readyDialog(v) {
+  const r = await dialog({
+    title: "The update is ready",
+    message: `Version ${v} is downloaded. Restart Eagles PDF viewer now to start using it, or it installs by itself when you close the app.`,
+    buttons: [{ id: "later", label: "When I close the app" }, { id: "now", label: "Restart now", primary: true }],
+  });
+  if (r === "now") restartToUpdate();
+  else { await host.installUpdateOnQuit(); toast(`Version ${v} installs when you close the app`); }
+}
+
+async function restartToUpdate() {
+  for (const P of panes.slice()) if (!(await confirmDiscard(P))) return;
+  for (const P of panes) storeView(P);
+  saveSession();
+  await saveCfg(true);
+  const r = await host.installUpdate(true);
+  if (!r || !r.ok) toast("Couldn't install the update: " + (r?.error || "unknown problem"), "error");
+}
+
 // ------------------------------------------------------------------ toolbar (ribbon)
 // You choose which buttons the toolbar shows (⋯ → Customize the toolbar, or
 // right-click it). The buttons get smaller when there are many, so the
@@ -2858,10 +2953,16 @@ else { sidebar.setRoot(null); sidebar.setTree(null); }
   }
 }
 
+if (canUpdate && cfg.autoUpdate !== false) {
+  setTimeout(() => checkForUpdates({ quiet: true }), 6000);
+  setInterval(() => checkForUpdates({ quiet: true }), 6 * 3600e3);
+}
+
 // Expose for automated tests.
 window.__inkleaf = {
   get viewer() { return viewer; }, get engine() { return engine; }, get state() { return state; }, get active() { return active; },
   panes, activate, openBeside, closePane, movePane, cyclePane, paste, copyMarks, duplicateMarks, selectAllMarks, setAutosave,
+  checkForUpdates, updateDialog, get updateInfo() { return updateInfo; },
   markupsPanel, openFind, closeFind, findStep, applyRibbon, ribbonDialog, fitToolbar, showPanel, get find() { return active?.find; },
   sidebar, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib,
 };
