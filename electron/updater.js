@@ -1,13 +1,13 @@
-// Automatic updates, from the public releases repository on GitHub
-// (github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic; the source code stays private).
-// It holds latest.json:
-//   { version, electron, date, notes: [...],
-//     app:   { url, sha256, size },    the app itself (app.asar, gzipped)
-//     setup: { url, sha256, size } }   the full installer
-// When the Electron runtime is the same, only the app (~5 MB) is fetched and
-// swapped in once the app has closed; if a version needs a new runtime, the
-// installer runs instead. Every download is checked against its SHA-256
-// before it is used; nothing is changed until then.
+// Automatic updates, from the app's public GitHub repository
+// (github.com/RukasuRi-96/PDF-windowsSurfaceViewer, folder downloads/).
+// downloads/latest.json says:
+//   { version, electron, date, notes: [...], changes: [{ version, notes }],
+//     setup: { url, sha256, size },   the installer zip (it holds the app)
+//     feed?: url }                     where to look from now on, if it moves
+// The installer zip is downloaded (~5 MB) and checked against its SHA-256.
+// When the Electron runtime is the same, the app (files/app.asar) is taken
+// out of it and swapped in once the app has closed; if a version needs a
+// new runtime, the installer runs instead. Nothing changes before the check.
 const { app, net } = require("electron");
 const path = require("path");
 const ofs = require("original-fs"); // .asar files are plain files here
@@ -15,7 +15,8 @@ const crypto = require("crypto");
 const zlib = require("zlib");
 const { spawn } = require("child_process");
 
-const FEED = process.env.EAGLES_UPDATE_URL || "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic/main/latest.json";
+const DEFAULT_FEED = "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewer/main/downloads/latest.json";
+const FEED = process.env.EAGLES_UPDATE_URL || DEFAULT_FEED;
 const isWin = process.platform === "win32";
 
 // a > b, for versions like 1.9.10 and 1.10.0.
@@ -32,20 +33,63 @@ function isNewer(a, b) {
 const canInstall = () => app.isPackaged && isWin;
 const supported = () => canInstall() || !!process.env.EAGLES_UPDATE_URL;
 const updateDir = () => path.join(app.getPath("userData"), "update");
+// If latest.json ever names a new address ("feed"), it's kept here and used
+// from then on (with the built-in one as a fallback).
+const movedFile = () => path.join(app.getPath("userData"), "update-feed.json");
+const okUrl = (u) => typeof u === "string" && /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)[:/])/.test(u);
+function movedFeed() {
+  try { const m = JSON.parse(ofs.readFileSync(movedFile(), "utf8")); return m.from === FEED && okUrl(m.feed) ? m.feed : null; } catch { return null; }
+}
+
+// One file out of a zip (stored or deflated; no zip64): the app inside the
+// installer zip.
+function fromZip(buf, name) {
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 65535); i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("the update isn't a zip file");
+  const count = buf.readUInt16LE(eocd + 10);
+  let at = buf.readUInt32LE(eocd + 16);
+  for (let k = 0; k < count; k++) {
+    if (buf.readUInt32LE(at) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(at + 10), csize = buf.readUInt32LE(at + 20), size = buf.readUInt32LE(at + 24);
+    const nlen = buf.readUInt16LE(at + 28), elen = buf.readUInt16LE(at + 30), clen = buf.readUInt16LE(at + 32), local = buf.readUInt32LE(at + 42);
+    const entry = buf.toString("utf8", at + 46, at + 46 + nlen).replace(/\\/g, "/");
+    at += 46 + nlen + elen + clen;
+    if (entry !== name) continue;
+    if (buf.readUInt32LE(local) !== 0x04034b50) break;
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(start, start + csize);
+    const out = method === 0 ? Buffer.from(data) : method === 8 ? zlib.inflateRawSync(data) : null;
+    if (!out || out.length !== size) throw new Error("the update's zip couldn't be read");
+    return out;
+  }
+  throw new Error(`the update has no ${name}`);
+}
 
 let last = null;    // the last check
 let staged = null;  // { version, kind, file } downloaded and verified
 let onQuit = false; // install when the app closes
 
+async function fetchFeed(url) {
+  const r = await net.fetch(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
+  if (!r.ok) throw new Error(`the update server answered ${r.status}`);
+  return r.json();
+}
+
 async function check() {
   const current = app.getVersion();
   if (!supported()) return { supported: false, current };
-  const r = await net.fetch(FEED + (FEED.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
-  if (!r.ok) throw new Error(`the update server answered ${r.status}`);
-  const info = await r.json();
+  const moved = movedFeed();
+  let info;
+  try { info = await fetchFeed(moved || FEED); } catch (err) { if (!moved) throw err; info = await fetchFeed(FEED); }
+  // The files have moved: look there from now on.
+  if (okUrl(info.feed) && info.feed !== (moved || FEED)) {
+    try { ofs.writeFileSync(movedFile(), JSON.stringify({ from: FEED, feed: info.feed })); } catch {}
+  }
   const kind = info.electron && info.electron !== process.versions.electron ? "setup" : "app";
-  const asset = info[kind];
-  last = { info, kind, asset };
+  // The installer zip holds the app too; older feeds had the app on its own.
+  const asset = info.setup || (kind === "app" ? info.app : null);
+  last = { info, kind, asset, zipped: !!info.setup };
   return {
     supported: true, current, latest: String(info.version || ""), newer: !!asset && isNewer(info.version, current),
     notes: Array.isArray(info.notes) ? info.notes.map(String) : [], date: info.date || "", kind, size: asset?.size || 0,
@@ -57,7 +101,7 @@ async function check() {
 
 async function download(onProgress) {
   if (!last) await check();
-  const { info, kind, asset } = last;
+  const { info, kind, asset, zipped } = last;
   if (!asset || !isNewer(info.version, app.getVersion())) throw new Error("there is no newer version");
   if (staged?.version === info.version) return { ok: true, version: info.version, kind };
   const r = await net.fetch(asset.url, { cache: "no-store" });
@@ -81,7 +125,7 @@ async function download(onProgress) {
   let file;
   if (kind === "app") {
     file = path.join(dir, `app-${info.version}.asar`);
-    ofs.writeFileSync(file, zlib.gunzipSync(buf));
+    ofs.writeFileSync(file, zipped ? fromZip(buf, "files/app.asar") : zlib.gunzipSync(buf));
   } else {
     file = path.join(dir, `EaglesPDF-Setup-${info.version}.zip`);
     ofs.writeFileSync(file, buf);
@@ -146,4 +190,4 @@ const installOnQuit = () => { if (staged) onQuit = true; return { ok: !!staged }
 // When the app closes with an update waiting (and "When I close the app" chosen).
 function finishOnQuit() { if (onQuit && staged) install(false); }
 
-module.exports = { isNewer, check, download, install, installOnQuit, finishOnQuit, helperScript, FEED };
+module.exports = { isNewer, check, download, install, installOnQuit, finishOnQuit, helperScript, fromZip, FEED, DEFAULT_FEED };

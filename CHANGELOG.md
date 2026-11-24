@@ -2,9 +2,14 @@
 
 The first lines under each version are shown in the app's update window.
 
+## 1.10.2
+
+- Updates now come from the app's own GitHub page, github.com/RukasuRi-96/PDF-windowsSurfaceViewer, which is public; the download link there works without signing in.
+- Updates download the installer and take the app out of it, so each version is a single file.
+
 ## 1.10.1
 
-- Updates now come from the public page github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic, which also has the download link; no GitHub sign-in needed.
+- Updates came from a separate public page (since replaced by the app's own GitHub page in 1.10.2).
 - The update window lists what changed in every version since yours.
 
 ## 1.10.0

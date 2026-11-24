@@ -1,0 +1,79 @@
+{
+  "version": "1.10.2",
+  "electron": "44.9.3",
+  "date": "2026-11-24",
+  "notes": [
+    "Updates now come from the app's own GitHub page, github.com/RukasuRi-96/PDF-windowsSurfaceViewer, which is public; the download link there works without signing in.",
+    "Updates download the installer and take the app out of it, so each version is a single file."
+  ],
+  "changes": [
+    {
+      "version": "1.10.2",
+      "notes": [
+        "Updates now come from the app's own GitHub page, github.com/RukasuRi-96/PDF-windowsSurfaceViewer, which is public; the download link there works without signing in.",
+        "Updates download the installer and take the app out of it, so each version is a single file."
+      ]
+    },
+    {
+      "version": "1.10.1",
+      "notes": [
+        "Updates came from a separate public page (since replaced by the app's own GitHub page in 1.10.2).",
+        "The update window lists what changed in every version since yours."
+      ]
+    },
+    {
+      "version": "1.10.0",
+      "notes": [
+        "Automatic updates: the app tells you when a new version is out and installs it for you (⋯ → Check for updates).",
+        "The download link now works without signing in to GitHub."
+      ]
+    },
+    {
+      "version": "1.9.1",
+      "notes": [
+        "The lasso drawn with the pen's side button now appears right under the pen on high-resolution screens such as the Surface Pro."
+      ]
+    },
+    {
+      "version": "1.9.0",
+      "notes": [
+        "Lasso select: hold the pen's side button (or choose Lasso) and draw round markups to move, resize, copy, paste, duplicate or delete them together.",
+        "Search in a PDF (Ctrl+F), with every match marked and a list of results.",
+        "A list of every markup in the PDF, with filters.",
+        "Autosave, which you can turn on or off.",
+        "Choose what the toolbar shows; its buttons shrink to fit, so nothing overlaps.",
+        "The highlighter can highlight words or draw freely.",
+        "The app's icon at the top left."
+      ]
+    },
+    {
+      "version": "1.8.0",
+      "notes": [
+        "Every PDF opened side by side can be written on; up to four, each with its own title bar to move or close it.",
+        "Paste without a keyboard: tap with the Snip tool, or press and hold the page.",
+        "Drag pages from the Pages panel onto another open PDF to copy them; a grip moves pages with a finger."
+      ]
+    },
+    {
+      "version": "1.7.0",
+      "notes": [
+        "Open a second PDF side by side.",
+        "Snip: copy part of a page as a picture and paste it at the same size.",
+        "Page names (labels and bookmarks) in the Pages panel and the page counter.",
+        "Press and hold a page in the Pages panel to move it."
+      ]
+    },
+    {
+      "version": "1.6.0",
+      "notes": [
+        "Merge PDFs, or every PDF in a folder.",
+        "The Pages panel: delete, add, copy in, duplicate, move and rotate pages."
+      ]
+    }
+  ],
+  "setup": {
+    "url": "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewer/main/downloads/updates/EaglesPDF-Setup-1.10.2.zip",
+    "sha256": "35bd4ed35a66deec6e29b0d032558a9663a247d3f138c45070364194a584c6b9",
+    "size": 5144994
+  }
+}

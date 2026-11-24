@@ -4,13 +4,13 @@
 
 A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, opens up to four PDFs side by side (each one fully editable), merges PDFs, lets you delete, add, copy in, move and rotate pages, copies any part of a page as a picture you can paste back at the same size, finds words in a PDF, lists every markup, saves by itself if you want, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. Draw a lasso round markups (or hold the pen's side button) to move, resize, copy or delete several at once. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
 
-### ⬇ [Download Eagles PDF viewer for Windows (EaglesPDF-Setup.zip, 5 MB)](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic/raw/main/EaglesPDF-Setup.zip)
+### ⬇ [Download Eagles PDF viewer for Windows (EaglesPDF-Setup.zip, 5 MB)](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)
 
-Then extract the zip and double-click **Install Eagles PDF viewer** ([step by step](#install)). The download is on the public page [PDF-windowsSurfaceViewerPublic](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic), so it works without signing in to GitHub, and the installed app keeps itself up to date from there. Setup fetches the Electron runtime from Electron's official GitHub releases and checks its fingerprint.
+Then extract the zip and double-click **Install Eagles PDF viewer** ([step by step](#install)). The link works without signing in to GitHub, and the installed app keeps itself up to date from this repository. Setup fetches the Electron runtime from Electron's official GitHub releases and checks its fingerprint.
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.10.1** · Windows 10 or 11, 64-bit
+**Current version: 1.10.2** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -22,7 +22,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 You need Windows 10 or 11 on a 64-bit Intel or AMD PC, such as a Surface Pro 9 with an Intel Core i5 or i7. You also need an internet connection while setup runs, and you don't need administrator rights.
 
-1. Download **[`EaglesPDF-Setup.zip`](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic/raw/main/EaglesPDF-Setup.zip)** (about 5 MB). The link downloads it straight away. You can also find it in the [`downloads` folder](downloads/EaglesPDF-Setup.zip) (click the **Download raw file** button ↓ there). Don't use the green **Code → Download ZIP** button; that gives you the source code, not the installer.
+1. Download **[`EaglesPDF-Setup.zip`](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)** (about 5 MB). The link downloads it straight away. You can also find it in the [`downloads` folder](downloads/EaglesPDF-Setup.zip) (click the **Download raw file** button ↓ there). Don't use the green **Code → Download ZIP** button; that gives you the source code, not the installer.
 2. Right-click the zip and choose **Extract All…**, then **Extract**. Setup doesn't work from inside the zip.
 3. The extracted folder holds **Install Eagles PDF viewer**, **README** and a **files** folder. Double-click **Install Eagles PDF viewer**.
    - Its full name is `Install Eagles PDF viewer.cmd`, but Windows usually hides the `.cmd` ending.
@@ -49,7 +49,7 @@ From version 1.10.0 the app **updates itself**:
 - Your settings, signatures, shortcuts, toolbar and open PDFs are kept. If a future version needs a new app runtime, the installer window opens to finish the update.
 - To stop it looking by itself, untick **Look for updates automatically** in the update window.
 
-Updates come from the public repository [RukasuRi-96/PDF-windowsSurfaceViewerPublic](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic), which holds only the installer and the update files (this source code stays private).
+Updates come from this repository's [`downloads`](downloads) folder: [`latest.json`](downloads/latest.json) names the newest version and its fingerprint, and the installer zip it points to holds the app.
 
 Before 1.10.0, or to reinstall: download the new `EaglesPDF-Setup.zip` and run its **Install Eagles PDF viewer** the same way. Your settings, drawing scales and last-opened file are kept.
 
@@ -386,7 +386,7 @@ These keys always do the same thing in their situation:
 | Problem | What to do |
 |---|---|
 | *"Windows protected your PC"* when running Setup | Click **More info**, then **Run anyway**. The app isn't code-signed. |
-| *Couldn't check for updates* | The app needs the internet and access to `raw.githubusercontent.com`. Try **⋯ → Check for updates** again later, or download the installer from [PDF-windowsSurfaceViewerPublic](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic). |
+| *Couldn't check for updates* | The app needs the internet and access to `raw.githubusercontent.com`. Try **⋯ → Check for updates** again later, or download the installer with the link at the top of this page. |
 | Can't find **Install Eagles PDF viewer** after extracting | Make sure you extracted `EaglesPDF-Setup.zip` (the installer), not the repository's source-code zip. If it's still missing, use **files → setup → Run with PowerShell** as described in [Install](#install). |
 | Setup says it couldn't download, or the safety check failed | Check your internet connection and run **Install Eagles PDF viewer** again. If your network blocks github.com, use `EaglesPDF-win-x64.zip` and `Install.cmd` instead (see [Other ways to install](#other-ways-to-install)). |
 | *"Couldn't save"* | The file may be open in another app, or in a read-only or locked folder. Use **Save as…** to save a copy somewhere else. |
@@ -419,7 +419,7 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 | `app/markups.js` | The markups list: per open PDF, summaries read from the edit worker a few dozen pages at a time, only while the list is showing; after an edit only the pages that changed are read again. |
 | `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), the current-page highlight, page names, selection, drag (grip, or press and hold) to reorder or onto another open PDF to copy. It follows the PDF in use and keeps each open PDF's thumbnails. |
 | `app/inkgeom.js` | Pressure strokes: width from pen pressure and the stroke's outline, shared by the viewer and the engine. |
-| `electron/updater.js` | Automatic updates: reads `latest.json` from the public releases repository, downloads the app (or, for a new Electron runtime, the installer), checks its SHA-256, and swaps `resources\app.asar` with a small PowerShell script once the app has closed. |
+| `electron/updater.js` | Automatic updates: reads `downloads/latest.json` from this repository, downloads the installer zip and checks its SHA-256, takes the app (`files/app.asar`) out of it (or, for a new Electron runtime, runs the installer), and swaps `resources\app.asar` with a small PowerShell script once the app has closed. |
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
 | `app/main.js` | Toolbar (customizable, sized to fit), dialogs, shortcuts, settings, scales, the open/save flow and autosave, snip, copy and paste, search, and the open PDFs (panes) side by side. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
@@ -478,10 +478,13 @@ The ARM build produces `dist/EaglesPDF-win-arm64.zip` only.
 ### Publish a version
 
 1. Add a `## <version>` section with a few `- ` lines to [`CHANGELOG.md`](CHANGELOG.md) (they're shown in the app's update window), and raise `version` in `package.json`.
-2. Build: `node tools/build-win.js x64`, and copy `dist/EaglesPDF-Setup.zip` into `downloads/`.
-3. Prepare the release: `node tools/release.js --keep <checkout of PDF-windowsSurfaceViewerPublic>`. It writes `dist/release/`: `latest.json` (version, notes, files and their SHA-256), `EaglesPDF-Setup.zip`, `app/<version>.asar.gz` (the app alone, for updates; the last three are kept) and the repository's `README.md`.
-4. Copy `dist/release/*` into the [PDF-windowsSurfaceViewerPublic](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic) checkout (replacing what's there), commit and push. Installed apps find the new version within a few hours, or straight away with **⋯ → Check for updates**.
-2. Optional, for the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases) with both packages (the small installer and the complete 150 MB one): open the **Actions** tab, choose **Build and release**, and click **Run workflow**. GitHub builds both packages on its own servers and publishes them as a release named after the version.
+2. Build: `node tools/build-win.js x64`.
+3. Release: `node tools/release.js`. It puts the installer in [`downloads/`](downloads) (`EaglesPDF-Setup.zip`, the download link, and `updates/EaglesPDF-Setup-<version>.zip`, the same file under its version for updates; git stores it once, and the two newest are kept), and writes [`downloads/latest.json`](downloads/latest.json): the version, the notes of the last few versions, the update's address, size and SHA-256.
+4. Commit and push to `main`. Installed apps find the new version within a few hours, or straight away with **⋯ → Check for updates**.
+
+If the files ever have to move, add `"feed": "<new address of latest.json>"` to the old `latest.json` for a while: installed apps remember it and look there from then on.
+
+Optional, for the [Releases page](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/releases) with both packages (the small installer and the complete 150 MB one): open the **Actions** tab, choose **Build and release**, and click **Run workflow**. GitHub builds both packages on its own servers and publishes them as a release named after the version.
 
 ### Tests
 

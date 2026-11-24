@@ -4,13 +4,19 @@ const OLD = process.env.WORK, SP = process.env.WORK, R = require('path').join(__
 const MM = 72 / 25.4;
 (async () => {
   const launch = (env = {}) => electron.launch({ executablePath: R + '/node_modules/electron/dist/electron', args: ['--no-sandbox', R], env: { ...process.env, INKLEAF_USER_DATA: SP + '/ud', ...env } });
-  // A stand-in for the public releases repository: version 9.9.9 is out.
-  const zlib = require('zlib'), crypto = require('crypto');
-  const newApp = crypto.randomBytes(200000), gz = zlib.gzipSync(newApp);
+  // A stand-in for the repository's downloads/ folder: version 9.9.9 is out,
+  // as an installer zip with the app (files/app.asar) inside.
+  const crypto = require('crypto'), fs0 = require('fs'), path0 = require('path');
+  const newApp = crypto.randomBytes(200000);
+  const zdir = path0.join(SP, 'feedzip'); fs0.rmSync(zdir, { recursive: true, force: true }); fs0.mkdirSync(path0.join(zdir, 'files'), { recursive: true });
+  fs0.writeFileSync(path0.join(zdir, 'files', 'app.asar'), newApp);
+  fs0.rmSync(path0.join(SP, 'feed.zip'), { force: true });
+  require('child_process').execFileSync('zip', ['-q', '-r', path0.join(SP, 'feed.zip'), '.'], { cwd: zdir });
+  const zipBytes = fs0.readFileSync(path0.join(SP, 'feed.zip'));
   const feedSrv = require('http').createServer((req, res) => {
     const u = req.url.split('?')[0], base = `http://127.0.0.1:${feedSrv.address().port}`;
-    if (u === '/latest.json') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ version: '9.9.9', electron: require(R + '/node_modules/electron/package.json').version, notes: ['A test update'], app: { url: base + '/app.gz', sha256: crypto.createHash('sha256').update(gz).digest('hex'), size: gz.length } })); }
-    else if (u === '/app.gz') { res.writeHead(200, { 'content-length': gz.length }); res.end(gz); }
+    if (u === '/downloads/latest.json') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ version: '9.9.9', electron: require(R + '/node_modules/electron/package.json').version, notes: ['A test update'], setup: { url: base + '/downloads/updates/EaglesPDF-Setup-9.9.9.zip', sha256: crypto.createHash('sha256').update(zipBytes).digest('hex'), size: zipBytes.length } })); }
+    else if (u === '/downloads/updates/EaglesPDF-Setup-9.9.9.zip') { res.writeHead(200, { 'content-length': zipBytes.length }); res.end(zipBytes); }
     else { res.writeHead(404); res.end(); }
   });
   await new Promise((r) => feedSrv.listen(0, '127.0.0.1', r));
@@ -65,7 +71,7 @@ const MM = 72 / 25.4;
   await page.waitForFunction(() => !window.__inkleaf.viewer.dirty, null, { timeout: 10000 });
   await page.screenshot({ path: SP + '/e3.png' });
   await app.close();
-  const app2 = await launch({ EAGLES_UPDATE_URL: `http://127.0.0.1:${feedSrv.address().port}/latest.json` });
+  const app2 = await launch({ EAGLES_UPDATE_URL: `http://127.0.0.1:${feedSrv.address().port}/downloads/latest.json` });
   const p2 = await app2.firstWindow();
   await p2.waitForFunction(() => window.__inkleaf?.viewer.doc?.states.get(0)?.base, null, { timeout: 15000 });
   await p2.waitForTimeout(500);
