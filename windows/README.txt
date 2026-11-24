@@ -20,7 +20,7 @@ UPDATES
   "Restart now" or "When I close the app". Or More (...) > Check for
   updates. The update is checked against its fingerprint first, and
   your settings, signatures and PDFs are kept. Updates come from
-  github.com/RukasuRi-96/EaglesPDF-releases.
+  github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic.
   You can also run a new "Install Eagles PDF viewer" the same way. If
   you had "Inkleaf PDF" (this app's earlier name), setup replaces it
   and keeps its settings.

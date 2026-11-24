@@ -51,12 +51,12 @@ const server = http.createServer((req, res) => {
   console.log("same version: newer", c.newer);
 
   // an app-only update
-  feed = { version: "1.10.1", electron: ELECTRON, notes: ["Faster search", "A fix"], app: { url: base + "/app.asar.gz", sha256: sha(gz), size: gz.length }, setup: { url: base + "/setup.zip", sha256: sha(Buffer.from("PK-fake-setup")), size: 13 } };
+  feed = { version: "1.10.1", electron: ELECTRON, notes: ["Faster search", "A fix"], changes: [{ version: "1.10.1", notes: ["Faster search", "A fix"] }, { version: "1.10.0", notes: ["Updates"] }, { version: "1.9.1", notes: ["Lasso"] }], app: { url: base + "/app.asar.gz", sha256: sha(gz), size: gz.length }, setup: { url: base + "/setup.zip", sha256: sha(Buffer.from("PK-fake-setup")), size: 13 } };
   c = await up.check();
   const prog = [];
   const d = await up.download((p) => prog.push(p));
   const staged = path.join(TMP, "update", "app-1.10.1.asar");
-  console.log("new version 1.10.1: newer", c.newer, "· kind", c.kind, "· notes", JSON.stringify(c.notes), "· downloaded", d.ok, "· progress reached", prog.at(-1), "· app unpacked and identical", fs.existsSync(staged) && fs.readFileSync(staged).equals(appBytes));
+  console.log("new version 1.10.1: newer", c.newer, "· kind", c.kind, "· notes", JSON.stringify(c.notes), "· changes since 1.10.0 only", JSON.stringify(c.changes.map((x) => x.version)), "· downloaded", d.ok, "· progress reached", prog.at(-1), "· app unpacked and identical", fs.existsSync(staged) && fs.readFileSync(staged).equals(appBytes));
   console.log("installing outside the Windows app is refused:", JSON.stringify(up.install(true)));
 
   // a version that needs a new runtime: the installer instead

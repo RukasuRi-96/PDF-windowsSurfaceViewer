@@ -1,5 +1,5 @@
 // Automatic updates, from the public releases repository on GitHub
-// (github.com/RukasuRi-96/EaglesPDF-releases; the source code stays private).
+// (github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic; the source code stays private).
 // It holds latest.json:
 //   { version, electron, date, notes: [...],
 //     app:   { url, sha256, size },    the app itself (app.asar, gzipped)
@@ -15,7 +15,7 @@ const crypto = require("crypto");
 const zlib = require("zlib");
 const { spawn } = require("child_process");
 
-const FEED = process.env.EAGLES_UPDATE_URL || "https://raw.githubusercontent.com/RukasuRi-96/EaglesPDF-releases/main/latest.json";
+const FEED = process.env.EAGLES_UPDATE_URL || "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic/main/latest.json";
 const isWin = process.platform === "win32";
 
 // a > b, for versions like 1.9.10 and 1.10.0.
@@ -49,6 +49,8 @@ async function check() {
   return {
     supported: true, current, latest: String(info.version || ""), newer: !!asset && isNewer(info.version, current),
     notes: Array.isArray(info.notes) ? info.notes.map(String) : [], date: info.date || "", kind, size: asset?.size || 0,
+    // What changed in every version since this one (newest first).
+    changes: Array.isArray(info.changes) ? info.changes.filter((c) => c && isNewer(c.version, current)).map((c) => ({ version: String(c.version), notes: (c.notes || []).map(String) })) : [],
     ready: staged?.version === info.version,
   };
 }

@@ -1,5 +1,5 @@
 // Prepares a release for the public releases repository
-// (github.com/RukasuRi-96/EaglesPDF-releases), after `node tools/build-win.js x64`:
+// (github.com/RukasuRi-96/PDF-windowsSurfaceViewerPublic), after `node tools/build-win.js x64`:
 //
 //   dist/release/
 //     latest.json              what the app checks: version, notes, files and their SHA-256
@@ -17,7 +17,7 @@ const zlib = require("zlib");
 const crypto = require("crypto");
 
 const ROOT = path.join(__dirname, "..");
-const REPO = "RukasuRi-96/EaglesPDF-releases";
+const REPO = "RukasuRi-96/PDF-windowsSurfaceViewerPublic";
 const RAW = `https://raw.githubusercontent.com/${REPO}/main/`;
 const pkg = require(path.join(ROOT, "package.json"));
 const electron = require(path.join(ROOT, "node_modules", "electron", "package.json")).version;
@@ -36,6 +36,16 @@ function notesFor(version) {
     if (l.startsWith("- ")) out.push(l.slice(2).trim());
   }
   return out;
+}
+
+// The recent versions and their notes, newest first, so someone a few
+// versions behind sees everything that changed since theirs.
+function recentChanges(n = 10) {
+  const lines = fs.readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf8").split(/\r?\n/);
+  return lines.filter((l) => /^## \d+\.\d+\.\d+\s*$/.test(l)).slice(0, n).map((l) => {
+    const version = l.slice(3).trim();
+    return { version, notes: notesFor(version) };
+  });
 }
 
 const asar = path.join(DIST, "EaglesPDF-Setup", "files", "app.asar");
@@ -68,6 +78,7 @@ const latest = {
   electron,
   date: new Date().toISOString().slice(0, 10),
   notes,
+  changes: recentChanges(),
   app: { url: RAW + appName, sha256: sha(gz), size: gz.length },
   setup: { url: RAW + "EaglesPDF-Setup.zip", sha256: sha(setupBytes), size: setupBytes.length },
 };

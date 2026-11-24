@@ -2110,8 +2110,10 @@ async function updateDialog() {
   const mb = r.size ? ` (${Math.max(0.1, r.size / 1e6).toFixed(1)} MB)` : "";
   const res = await dialog({
     title: `Update to version ${r.latest}?`,
-    html: `<p>You have version ${esc(r.current)}.${r.notes.length ? " What's new:" : ""}</p>` +
-      (r.notes.length ? `<ul class="upd-notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : "") +
+    html: `<p>You have version ${esc(r.current)}.${r.notes.length || r.changes?.length ? " What's new:" : ""}</p>` +
+      (r.changes?.length > 1
+        ? r.changes.map((c) => `<div class="upd-ver">Version ${esc(c.version)}</div><ul class="upd-notes">${c.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>`).join("")
+        : r.notes.length ? `<ul class="upd-notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : "") +
       `<p class="hint">The download${mb} is checked before it's used. Your settings, signatures, shortcuts and PDFs are kept.` +
       (r.kind === "setup" ? " This version needs a new app runtime, so the installer window opens to finish." : "") + `</p>` + autoUpdateBox(),
     buttons: [{ id: "later", label: "Later" }, { id: "go", label: "Update now", primary: true }],

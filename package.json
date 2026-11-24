@@ -1,7 +1,7 @@
 {
   "name": "eagles-pdf-viewer",
   "productName": "Eagles PDF viewer",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "description": "Fast touch & pen PDF reader and annotator",
   "main": "electron/main.js",
   "private": true,
