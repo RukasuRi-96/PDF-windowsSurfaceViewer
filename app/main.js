@@ -2,7 +2,7 @@ import { host } from "./host.js";
 import { Engine } from "./engine.js";
 import { Viewer, cssColor, penActive } from "./viewer.js";
 import { Sidebar } from "./sidebar.js";
-import { PagesPanel, moveOrder } from "./pages.js";
+import { PagesPanel, moveOrder, THUMB_DEFAULT } from "./pages.js";
 import { MarkupsPanel } from "./markups.js";
 import { icon } from "./icons.js";
 import { Keymap, comboFromEvent, formatCombo } from "./shortcuts.js";
@@ -28,6 +28,8 @@ const cfg = Object.assign(
     sidebarOpen: true,
     pagesOpen: false,     // the panel on the right (Pages, Markups, Search)
     panelTab: "pages",
+    panelW: 236,          // the panel's width (drag its left edge)
+    thumbW: 132,          // page thumbnails' width in the Pages panel
     autosave: false,      // save by itself a few seconds after changes
     autoUpdate: true,     // look for a new version at start (installed app)
     ribbon: {},           // toolbar buttons shown or hidden (id -> bool)
@@ -467,6 +469,7 @@ const pagesPanel = new PagesPanel($("#pages"), engine, {
     label, icon: cfg.pageLabels === k ? "check" : null, run: () => setPageLabels(k),
   }))),
   onClose: () => togglePages(false),
+  onThumbSize: (w) => { cfg.thumbW = w; saveCfg(); },
   // Pages dragged out of the panel onto another open PDF are copied there.
   onDragOut: (x, y) => {
     const T = x == null ? null : panes.find((Q) => Q !== active && Q.state.path && Q === paneAt(x, y));
@@ -1522,6 +1525,36 @@ function showPanel(tab) {
 const panelIs = (tab) => cfg.pagesOpen && cfg.panelTab === tab;
 function togglePages(force) { showPanel((force ?? !panelIs("pages")) ? "pages" : null); }
 function toggleMarks(force) { showPanel((force ?? !panelIs("marks")) ? "marks" : null); }
+// The panel's width: drag its left edge (double-click: back to normal).
+const RP_DEFAULT = 236;
+function setPanelWidth(w, save = true) {
+  const max = Math.max(220, Math.min(760, window.innerWidth * 0.6));
+  cfg.panelW = Math.round(Math.max(180, Math.min(max, w)));
+  document.documentElement.style.setProperty("--rp-w", cfg.panelW + "px");
+  if (save) saveCfg();
+}
+{
+  const bar = document.querySelector("#rpanel .rp-resize");
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const right = $("#rpanel").getBoundingClientRect().right;
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("active");
+    const move = (ev) => setPanelWidth(right - ev.clientX, false);
+    const up = () => {
+      bar.classList.remove("active");
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", up);
+      bar.removeEventListener("pointercancel", up);
+      saveCfg();
+    };
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", up);
+    bar.addEventListener("pointercancel", up);
+  });
+  bar.addEventListener("dblclick", () => setPanelWidth(RP_DEFAULT));
+}
 document.querySelector("#rpanel .rp-tabs").addEventListener("click", (e) => {
   const t = e.target.closest("[data-tab]");
   if (t) showPanel(t.dataset.tab);
@@ -2907,6 +2940,8 @@ appEl.classList.add("no-doc");
 toggleSidebar(cfg.sidebarOpen);
 if (!["number", "name", "both"].includes(cfg.pageLabels)) cfg.pageLabels = "both";
 pagesPanel.labelMode = cfg.pageLabels;
+setPanelWidth(cfg.panelW || RP_DEFAULT, false);
+pagesPanel.setThumbSize(cfg.thumbW || THUMB_DEFAULT);
 showPanel(cfg.pagesOpen ? (["pages", "marks", "find"].includes(cfg.panelTab) ? cfg.panelTab : "pages") : null);
 applyRibbon();
 setAutosave(cfg.autosave, false);
@@ -2964,7 +2999,7 @@ if (canUpdate && cfg.autoUpdate !== false) {
 window.__inkleaf = {
   get viewer() { return viewer; }, get engine() { return engine; }, get state() { return state; }, get active() { return active; },
   panes, activate, openBeside, closePane, movePane, cyclePane, paste, copyMarks, duplicateMarks, selectAllMarks, setAutosave,
-  checkForUpdates, updateDialog, get updateInfo() { return updateInfo; },
+  pagesPanel, setPanelWidth, checkForUpdates, updateDialog, get updateInfo() { return updateInfo; },
   markupsPanel, openFind, closeFind, findStep, applyRibbon, ribbonDialog, fitToolbar, showPanel, get find() { return active?.find; },
   sidebar, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib,
 };

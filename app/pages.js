@@ -6,15 +6,23 @@
 // bookmark), or both. With PDFs side by side, the panel shows the one in use;
 // each one's thumbnails are kept, so switching between them is instant.
 //
+// The thumbnails can be made bigger or smaller (the slider, pinching, or
+// Ctrl+wheel) and the panel wider or narrower (its edge, see main.js); when
+// they're small or the panel is wide, pages sit in a grid of several columns.
+//
 // Speed: only the thumbnails in (or near) view exist; they are rendered at
 // thumbnail size by the render workers only after the page view's own tiles,
-// straight from the page (nothing cached that the page view needs).
+// straight from the page (nothing cached that the page view needs). Making
+// them smaller reuses what's drawn; bigger draws them again, sharper.
 import { icon } from "./icons.js";
 
-const THUMB_W = 132;   // thumbnail width (CSS px)
+export const THUMB_MIN = 64, THUMB_MAX = 320, THUMB_DEFAULT = 132;
 const LABEL_H = 22;
-const GAP = 12;
+const GAP = 12;        // between rows
+const GAP_X = 10;      // between columns
+const PAD_X = 6;
 const PAD_TOP = 10;
+const clampW = (w) => Math.round(Math.max(THUMB_MIN, Math.min(THUMB_MAX, w)));
 let GEN = 0;           // thumbnail generations, unique across documents
 
 export class PagesPanel {
@@ -32,6 +40,8 @@ export class PagesPanel {
     this.key = null;          // which document (side-by-side PDFs share the panel)
     this.saved = new Map();   // key -> that document's panel state
     this.labelMode = "both"; // number | name | both
+    this.thumbW = THUMB_DEFAULT; // thumbnail width (CSS px)
+    this.cols = 1;
     root.tabIndex = -1;
     root.innerHTML = `
       <div class="pp-head">
@@ -40,11 +50,27 @@ export class PagesPanel {
         <button class="btn icon-btn" data-act="add" title="Add pages">${icon("filePlus")}</button>
         <button class="btn icon-btn" data-act="delete" title="Delete the selected pages (Delete)">${icon("trash")}</button>
       </div>
+      <div class="pp-size" title="Page size (or pinch the pages, or Ctrl+wheel)">
+        <button class="btn icon-btn" data-act="smaller" title="Smaller pages">${icon("zoomOut")}</button>
+        <input type="range" min="${THUMB_MIN}" max="${THUMB_MAX}" step="4" aria-label="Page size">
+        <button class="btn icon-btn" data-act="bigger" title="Bigger pages">${icon("zoomIn")}</button>
+      </div>
       <div class="pp-list"><div class="pp-inner"></div><div class="pp-drop" hidden></div></div>`;
     this.list = root.querySelector(".pp-list");
     this.inner = root.querySelector(".pp-inner");
     this.dropEl = root.querySelector(".pp-drop");
     this.countEl = root.querySelector(".pp-count");
+    // Page size: the slider and its buttons.
+    this.slider = root.querySelector(".pp-size input");
+    this.slider.value = this.thumbW;
+    this.slider.addEventListener("input", () => this.setThumbSize(+this.slider.value));
+    this.slider.addEventListener("change", () => cb.onThumbSize?.(this.thumbW));
+    root.querySelector(".pp-size").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (!b) return;
+      this.setThumbSize(this.thumbW * (b.dataset.act === "bigger" ? 1.25 : 0.8));
+      cb.onThumbSize?.(this.thumbW);
+    });
     root.querySelector(".pp-head").addEventListener("click", (e) => {
       const b = e.target.closest("[data-act]");
       if (!b) return;
@@ -54,10 +80,38 @@ export class PagesPanel {
       else if (b.dataset.act === "close") cb.onClose?.();
     });
     this.list.addEventListener("scroll", () => this._schedule());
-    new ResizeObserver(() => this._schedule()).observe(this.list);
+    // A wider or narrower panel: the columns change.
+    new ResizeObserver(() => { if (this.open && this.list.clientWidth !== this.layoutW) this._relayout(); else this._schedule(); }).observe(this.list);
     this.list.addEventListener("pointerdown", (e) => this._down(e));
+    // Two fingers pinch the pages bigger or smaller.
+    const span = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    this.list.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 2 && !this.drag) { this._pinch = { d0: Math.max(20, span(e.touches)), w0: this.thumbW }; this._multi = true; clearTimeout(this._holdTimer); }
+    }, { passive: true });
     // While a finger holds a page to move it, the list must not scroll.
-    this.list.addEventListener("touchmove", (e) => { if (this.drag || this._hold) e.preventDefault(); }, { passive: false });
+    this.list.addEventListener("touchmove", (e) => {
+      if (this._pinch && e.touches.length === 2) {
+        e.preventDefault();
+        this._pinchW = this._pinch.w0 * (span(e.touches) / this._pinch.d0);
+        if (!this._pinchRaf) this._pinchRaf = requestAnimationFrame(() => { this._pinchRaf = 0; this.setThumbSize(this._pinchW); });
+        return;
+      }
+      if (this.drag || this._hold) e.preventDefault();
+    }, { passive: false });
+    const pinchEnd = (e) => {
+      if (e.touches.length === 0) this._multi = false;
+      if (this._pinch && e.touches.length < 2) { this._pinch = null; cb.onThumbSize?.(this.thumbW); }
+    };
+    this.list.addEventListener("touchend", pinchEnd);
+    this.list.addEventListener("touchcancel", pinchEnd);
+    // Ctrl+wheel: the same with a mouse or touchpad.
+    this.list.addEventListener("wheel", (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      this.setThumbSize(this.thumbW * Math.exp(-e.deltaY * 0.0025));
+      clearTimeout(this._wheelSave);
+      this._wheelSave = setTimeout(() => cb.onThumbSize?.(this.thumbW), 300);
+    }, { passive: false });
     this.list.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       if (performance.now() - (this._touchAt || -1e9) < 1500) return; // touch: handled by press and hold
@@ -114,6 +168,31 @@ export class PagesPanel {
   }
 
   get open() { return !this.root.hidden; }
+
+  // Thumbnail width in CSS px (64-320); the page in view stays in view.
+  setThumbSize(w) {
+    w = clampW(w);
+    this.slider.value = w;
+    if (w === this.thumbW) return;
+    this.thumbW = w;
+    this._relayout();
+  }
+
+  // Lay out again (new size or width), keeping the page at the top in view.
+  _relayout() {
+    let anchor = -1, off = 0;
+    if (this.tops && this.pages.length) {
+      const st = this.list.scrollTop;
+      anchor = 0;
+      while (anchor < this.pages.length - 1 && this.tops[anchor] + this.heights[anchor] <= st) anchor++;
+      off = this.tops[anchor] - st;
+    }
+    this.inner.textContent = "";
+    this.items.clear();
+    this._layout();
+    if (anchor >= 0 && anchor < this.pages.length) this.list.scrollTop = Math.max(0, this.tops[anchor] - off);
+    if (this.open) this._render();
+  }
 
   show(on) {
     this.root.hidden = !on;
@@ -187,17 +266,37 @@ export class PagesPanel {
   }
 
   // ---- layout and painting (only what's in view)
+  // Rows of `cols` pages (one column unless they're small or the panel is
+  // wide); each row is as tall as its tallest page.
   _layout() {
-    const n = this.pages.length;
+    const n = this.pages.length, tw = this.thumbW;
+    const W = this.list.clientWidth || 216;
+    this.layoutW = this.list.clientWidth;
+    const cols = Math.max(1, Math.floor((W - 2 * PAD_X + GAP_X) / (tw + GAP_X)));
+    const cellW = cols === 1 ? W - 2 * PAD_X : (W - 2 * PAD_X - (cols - 1) * GAP_X) / cols;
+    this.cols = cols;
+    this.cellW = cellW;
+    this.root.style.setProperty("--thumb-w", tw + "px");
+    this.root.classList.toggle("grid", cols > 1);
     this.tops = new Float64Array(n);
+    this.lefts = new Float64Array(n);
     this.heights = new Float64Array(n);
+    this.thumbH = new Float64Array(n);
     let y = PAD_TOP;
-    for (let i = 0; i < n; i++) {
-      const p = this.pages[i], w = p.x1 - p.x0, h = p.y1 - p.y0;
-      const th = Math.round(Math.min(THUMB_W * 2, Math.max(THUMB_W * 0.3, (THUMB_W * h) / Math.max(1, w))));
-      this.tops[i] = y;
-      this.heights[i] = th + LABEL_H;
-      y += th + LABEL_H + GAP;
+    for (let r = 0; r * cols < n; r++) {
+      let rowH = 0;
+      const a = r * cols, b = Math.min(n, a + cols);
+      for (let i = a; i < b; i++) {
+        const p = this.pages[i], w = p.x1 - p.x0, h = p.y1 - p.y0;
+        this.thumbH[i] = Math.round(Math.min(tw * 2, Math.max(tw * 0.3, (tw * h) / Math.max(1, w))));
+        rowH = Math.max(rowH, this.thumbH[i] + LABEL_H);
+      }
+      for (let i = a; i < b; i++) {
+        this.tops[i] = y;
+        this.lefts[i] = PAD_X + (i - a) * (cellW + GAP_X);
+        this.heights[i] = rowH;
+      }
+      y += rowH + GAP;
     }
     this.inner.style.height = y + "px";
   }
@@ -225,11 +324,14 @@ export class PagesPanel {
     const mid = this.list.scrollTop + this.list.clientHeight / 2;
     const dpr = window.devicePixelRatio || 1;
     const tasks = [];
+    const want = this.thumbW * dpr;
     for (let i = a; i < b; i++) {
-      if (this.cache.has(i)) continue;
-      const p = this.pages[i], res = (THUMB_W * dpr) / Math.max(1, p.x1 - p.x0);
+      // Drawn already, big enough (a bigger one just shows smaller).
+      const cv = this.cache.get(i);
+      if (cv && cv.width >= want * 0.85) continue;
+      const p = this.pages[i], res = want / Math.max(1, p.x1 - p.x0);
       tasks.push({
-        key: `t${this.gen}:${i}`, thumb: true, gen: this.gen, page: i, res,
+        key: `t${this.gen}:${i}:${Math.round(want)}`, thumb: true, gen: this.gen, page: i, res,
         bbox: [Math.floor(p.x0 * res), Math.floor(p.y0 * res), Math.ceil(p.x1 * res), Math.ceil(p.y1 * res)],
         d: Math.abs(this.tops[i] + this.heights[i] / 2 - mid),
       });
@@ -243,9 +345,12 @@ export class PagesPanel {
     el.className = "pp-item" + (this.sel.has(i) ? " sel" : "") + (i === this.current ? " current" : "");
     el.dataset.i = i;
     el.style.top = this.tops[i] + "px";
+    el.style.left = this.lefts[i] + "px";
+    el.style.width = this.cellW + "px";
+    el.style.height = this.heights[i] + "px";
     const box = document.createElement("div");
     box.className = "pp-thumb";
-    box.style.height = this.heights[i] - LABEL_H + "px";
+    box.style.height = this.thumbH[i] + "px";
     const cv = this.cache.get(i);
     if (cv) box.appendChild(cv);
     const grip = document.createElement("span");
@@ -265,6 +370,10 @@ export class PagesPanel {
 
   _onThumb(task, bmp) {
     if (task.gen !== this.gen || task.page >= this.pages.length) { bmp.close(); return; }
+    // A smaller one arriving after a bigger one: keep the bigger.
+    const had = this.cache.get(task.page);
+    if (had && had.width >= bmp.width) { bmp.close(); return; }
+    if (had) had.width = 0;
     const cv = document.createElement("canvas");
     cv.width = bmp.width;
     cv.height = bmp.height;
@@ -312,6 +421,7 @@ export class PagesPanel {
     if (i < 0) return;
     this.root.focus({ preventScroll: true });
     const touch = e.pointerType === "touch";
+    if (touch && this._multi) return; // two fingers: pinching, not a tap
     const x0 = e.clientX, y0 = e.clientY;
     // The grip moves the page straight away, even with a finger.
     const grip = !!e.target.closest(".pp-grip");
@@ -334,7 +444,7 @@ export class PagesPanel {
       if (!moved && far) {
         moved = true;
         clearTimeout(this._holdTimer);
-        if (!touch || held) this._startDrag(i, e);
+        if ((!touch || held) && !this._pinch) this._startDrag(i, e);
       }
       if (this.drag) this._dragMove(ev);
     };
@@ -347,7 +457,7 @@ export class PagesPanel {
       this.list.removeEventListener("pointerup", up);
       this.list.removeEventListener("pointercancel", up);
       if (this.drag) { this._dragEnd(ev.type === "pointercancel"); return; }
-      if (ev.type !== "pointerup") return;
+      if (ev.type !== "pointerup" || (touch && (this._multi || this._pinch))) return;
       if (held && !moved && !grip) {
         if (!this.sel.has(i)) this._select(i, {});
         this.cb.onMenu?.(i, last.clientX, last.clientY);
@@ -383,14 +493,27 @@ export class PagesPanel {
     D.out = ev.clientX < r.left - 4 && this.cb.onDragOut ? this.cb.onDragOut(ev.clientX, ev.clientY, D.pages) : null;
     D.ghost.classList.toggle("copy", !!D.out);
     if (D.out || ev.clientX < r.left - 4) { D.to = -1; this.dropEl.hidden = true; D.scroll = 0; return; }
-    const y = ev.clientY - r.top + this.list.scrollTop;
-    // Insertion point: before the first page whose middle is below the pointer.
-    let to = this.pages.length;
-    for (let k = 0; k < this.pages.length; k++) if (y < this.tops[k] + this.heights[k] / 2) { to = k; break; }
+    const n = this.pages.length, x = ev.clientX - r.left, y = ev.clientY - r.top + this.list.scrollTop;
+    let to = n;
+    if (this.cols === 1) {
+      // One column: before the first page whose middle is below the pointer.
+      for (let k = 0; k < n; k++) if (y < this.tops[k] + this.heights[k] / 2) { to = k; break; }
+      const lineY = to < n ? this.tops[to] - GAP / 2 : this.tops[n - 1] + this.heights[n - 1] + GAP / 2;
+      this.dropEl.className = "pp-drop";
+      this.dropEl.style.cssText = `top:${lineY - 1.5}px`;
+    } else {
+      // A grid: the row under the pointer, then the gap nearest it in that row.
+      let a = Math.floor((n - 1) / this.cols) * this.cols; // below every row: the last one
+      for (let k = 0; k < n; k += this.cols) if (y < this.tops[k] + this.heights[k] + GAP / 2) { a = k; break; }
+      const b = Math.min(n, a + this.cols);
+      to = a;
+      while (to < b && x > this.lefts[to] + this.cellW / 2) to++;
+      const lx = to < b ? this.lefts[to] - GAP_X / 2 : this.lefts[b - 1] + this.cellW + GAP_X / 2;
+      this.dropEl.className = "pp-drop v";
+      this.dropEl.style.cssText = `left:${lx - 1.5}px;top:${this.tops[a]}px;height:${this.heights[a]}px`;
+    }
     D.to = to;
-    const lineY = to < this.pages.length ? this.tops[to] - GAP / 2 : this.tops[this.pages.length - 1] + this.heights[this.pages.length - 1] + GAP / 2;
     this.dropEl.hidden = false;
-    this.dropEl.style.top = lineY - 1.5 + "px";
     // Scroll when dragging near the top or bottom edge.
     const edge = 40;
     D.scroll = ev.clientY < r.top + edge ? -1 : ev.clientY > r.bottom - edge ? 1 : 0;
@@ -419,9 +542,10 @@ export class PagesPanel {
     const last = this.pages.length - 1;
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); e.stopPropagation(); this.cb.onDelete?.(this.selected()); }
     else if ((e.ctrlKey || e.metaKey) && e.code === "KeyA") { e.preventDefault(); e.stopPropagation(); this.selectAll(); }
-    else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp" || (this.cols > 1 && (e.key === "ArrowLeft" || e.key === "ArrowRight"))) {
       e.preventDefault(); e.stopPropagation();
-      const i = Math.max(0, Math.min(last, this.anchor + (e.key === "ArrowDown" ? 1 : -1)));
+      const step = { ArrowDown: this.cols, ArrowUp: -this.cols, ArrowLeft: -1, ArrowRight: 1 }[e.key];
+      const i = Math.max(0, Math.min(last, this.anchor + step));
       this._select(i, e.shiftKey ? { shiftKey: true } : {});
       if (!e.shiftKey) this.anchor = i;
       this.reveal(i);

@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.10.2** · Windows 10 or 11, 64-bit
+**Current version: 1.11.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -199,9 +199,12 @@ Click the **Pages** button at the top right (or **Ctrl+Shift+P**) to show a thum
   - **Blank page…** in A4, A3, A5, Letter, Legal or Tabloid, or the same size as the page next to it, portrait or landscape, as many as you want, before or after any page;
   - **Pages from another PDF…**: all of them, or some (like `1-3, 5`);
   - **Duplicate**.
-- **Move:** drag pages up or down with the mouse or pen. With a finger, drag a page by its **grip** (the dotted handle on its corner) straight away, or **press and hold** the page until it lifts, then drag it (hold without moving to get the menu instead). A line shows where it will go. You can also right-click → **Move to the start / end**.
+- **Move:** drag pages with the mouse or pen. With a finger, drag a page by its **grip** (the small dotted handle on its corner; it's easy to hit even though it's small) straight away, or **press and hold** the page until it lifts, then drag it (hold without moving to get the menu instead). A line shows where it will go. You can also right-click → **Move to the start / end**.
 - **Copy pages into another open PDF:** with PDFs [side by side](#10-side-by-side-several-pdfs-at-once), drag pages out of the panel and drop them on the other PDF (it says *Copy the pages here*). They're added after the page shown there, with their markups, and the PDF you took them from keeps them.
 - **Rotate:** right-click → **Rotate right / left**.
+- **Page size:** the slider at the top of the panel (or its **−** / **+**) makes the pages bigger or smaller. You can also pinch with two fingers over the pages, or hold **Ctrl** and turn the mouse wheel there. Bigger pages are drawn sharper.
+- **Panel size:** drag the panel's left edge to make it wider or narrower; double-click the edge to put it back to normal. When the pages are small enough, or the panel wide enough, they're laid out in a **grid** of several columns: drag pages anywhere in the grid (an upright line shows where they'll go), and the arrow keys move left, right, up and down.
+- Both sizes are kept for next time.
 - Every change can be undone (**Ctrl+Z**) and redone (**Ctrl+Y**). Saving writes the new pages into the PDF. Pages you delete are removed from the file, not just hidden.
 
 Thumbnails are drawn only for the pages in view, and only after the page you're reading, so even a 500-page PDF stays fast. With PDFs side by side, the panel shows the one you're working in and switches as you move between them.
@@ -368,6 +371,7 @@ The defaults:
 | Ctrl+O · Ctrl+Shift+F · Ctrl+B · F5 | Open folder · filter files · show/hide the file list · refresh it |
 | Ctrl+Shift+M | Show/hide the markups list |
 | Ctrl+Shift+P · Delete (in the panel) | Show/hide the Pages panel · delete the selected pages |
+| Ctrl + mouse wheel (over the Pages panel) | Bigger or smaller pages in the panel |
 | Ctrl+Shift+O · Ctrl+W · Ctrl+Tab / Ctrl+Shift+Tab | Open a PDF side by side · close the PDF in use · go to the next / previous PDF side by side |
 | F11 · F1 · Ctrl+K | Full screen · help · keyboard shortcuts |
 

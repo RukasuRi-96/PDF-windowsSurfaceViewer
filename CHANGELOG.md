@@ -2,6 +2,12 @@
 
 The first lines under each version are shown in the app's update window.
 
+## 1.11.0
+
+- The Pages panel: make the pages bigger or smaller with the slider at its top, a two-finger pinch or Ctrl + mouse wheel.
+- Drag the panel's left edge to make it wider or narrower (double-click for normal width); small pages or a wide panel show a grid of pages, which you can drag around too.
+- The grip for moving pages with a finger is smaller, and still easy to hit.
+
 ## 1.10.2
 
 - Updates now come from the app's own GitHub page, github.com/RukasuRi-96/PDF-windowsSurfaceViewer, which is public; the download link there works without signing in.

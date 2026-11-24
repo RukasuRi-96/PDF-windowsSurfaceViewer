@@ -108,6 +108,11 @@ PAGES (button at the top right, or Ctrl+Shift+P)
   drag a page by its grip (the dotted handle), or press and hold it
   until it lifts, then drag it. Drop pages on another PDF open side by
   side to copy them there. Ctrl+Z undoes.
+  Page size: the slider at the top of the panel (or - and +), a
+  two-finger pinch over the pages, or Ctrl + mouse wheel there. Panel
+  size: drag its left edge; double-click the edge for normal width.
+  Small pages or a wide panel show the pages in a grid; drag them
+  anywhere in it. Both sizes are kept for next time.
   The page you are reading is highlighted. If the PDF names its pages
   (like A-101) or has bookmarks, the names are shown too: the tag button
   at the top of the panel switches between numbers, names or both.
