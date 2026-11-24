@@ -39,7 +39,6 @@ export class PagesPanel {
         <button class="btn icon-btn" data-act="labels" title="Show page numbers, names or both">${icon("tag")}</button>
         <button class="btn icon-btn" data-act="add" title="Add pages">${icon("filePlus")}</button>
         <button class="btn icon-btn" data-act="delete" title="Delete the selected pages (Delete)">${icon("trash")}</button>
-        <button class="btn icon-btn" data-act="close" title="Hide pages">${icon("x")}</button>
       </div>
       <div class="pp-list"><div class="pp-inner"></div><div class="pp-drop" hidden></div></div>`;
     this.list = root.querySelector(".pp-list");

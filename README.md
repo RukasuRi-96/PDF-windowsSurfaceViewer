@@ -2,7 +2,7 @@
 
 # Eagles PDF viewer
 
-A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, opens up to four PDFs side by side (each one fully editable), merges PDFs, lets you delete, add, copy in, move and rotate pages, copies any part of a page as a picture you can paste back at the same size, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
+A fast PDF reader and markup app for Windows tablets like the Surface Pro, for touch, pen and mouse. It lists every PDF in a folder (including subfolders) down the left, opens up to four PDFs side by side (each one fully editable), merges PDFs, lets you delete, add, copy in, move and rotate pages, copies any part of a page as a picture you can paste back at the same size, finds words in a PDF, lists every markup, saves by itself if you want, and lets you highlight, write and draw on them, add boxes, arrows, clouds, callouts and text, sign them, copy text, and measure distances and areas on scaled drawings. Draw a lasso round markups (or hold the pen's side button) to move, resize, copy or delete several at once. You can also erase parts of a page or retype a line of its text, and embed your markups so they can no longer be moved. Everything you add is saved into the PDF itself.
 
 ### ⬇ [Download Eagles PDF viewer for Windows (EaglesPDF-Setup.zip, 5 MB)](https://github.com/RukasuRi-96/PDF-windowsSurfaceViewer/raw/main/downloads/EaglesPDF-Setup.zip)
 
@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.8.0** · Windows 10 or 11, 64-bit
+**Current version: 1.9.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -82,17 +82,18 @@ To jump to a page, click the page counter at the bottom of the screen and type a
 
 ### 3. The tools
 
-The toolbar in the middle holds the tools:
+The toolbar holds the tools. The eagle at the top left is the app's icon.
 
 | Tool | Key | What it does |
 |---|---|---|
 | **Select** | V | Tap or drag any markup to select it, then move, reshape, retype, restyle or delete it. Drag over text to select and copy it. Dragging on blank paper pans. |
 | **Pan** | H | Drag to move around. |
-| **Highlight** | M | Snaps to the text you sweep over. Where there's no text, it becomes a freehand marker. |
+| **Highlight** | M | Two ways, chosen in its colour menu (tap the tool again): **Words** snaps to the text you sweep over (where there's no text it becomes a freehand marker); **Draw** is a freehand marker wherever you draw, even over text. A small **~** on the tool means Draw. |
 | **Pen** | P | Write or draw freehand. |
 | **Shapes** | B | Box, line, arrow, cloud, callout or text. Tap the tool again (or its small ▾) to choose. It always draws, even on top of other markups. See [Shapes, text and callouts](#4-shapes-text-and-callouts). |
 | **Signature** | S | Place your signature, with its background removed. See [Sign](#5-sign). |
 | **Eraser** | E | Removes the ink, shapes, text, signatures, highlights, pictures and measurements you touch. |
+| **Lasso** | L | Draw round markups, or over them, to select them all; then move, resize, copy, paste, duplicate or delete them together. The pen's side button does the same with any tool. See [Lasso](#11-lasso-select-several-markups). |
 | **Snip** | C | Drag a box, or draw around something, to copy it as a picture. Then **tap** where it should go (or press **Ctrl+V**): it's pasted at exactly the same size, as a picture you can move and resize. See [Snip](#9-snip-copy-part-of-a-page-as-a-picture). |
 | **Edit content** | X | Drag a box to erase an area of the page; tap a line of the page's own text to retype it. See [Edit the page's content](#6-edit-the-pages-content). |
 | **Measure** | R | Distance, path length and area at the drawing's scale (see below). |
@@ -101,7 +102,9 @@ The toolbar in the middle holds the tools:
 - **Colors and thickness:** tap the active tool again, or tap the colored dot next to the tools.
 - **Pen and finger:** the pen uses the selected tool, and a finger always pans and zooms. To draw with a finger, turn on the **finger button** (**T**); you then pan and zoom with two fingers.
 - **Writing with the pen:** strokes get thinner or thicker with pen pressure, like ink (turn this off in the Pen tool's colour menu). While the pen hovers, a dot in the ink's colour and size shows where it will write. Ink appears with very little delay and keeps the exact shape you wrote.
-- **Erasing with the pen:** flip the Surface Pen over and use its eraser end, or hold its side button.
+- **Erasing with the pen:** flip the Surface Pen over and use its eraser end (its top button).
+- **Selecting with the pen:** hold the pen's **side button** and draw round markups: they're selected whatever tool you're using (see [Lasso](#11-lasso-select-several-markups)).
+- **Choose what the toolbar shows:** **⋯ → Customize the toolbar…** (or right-click the toolbar, or press and hold it). Tick the buttons you want: every tool, colour and size, finger draws, undo, redo, paste, search, the zoom buttons, open side by side, full screen, the Pages and Markups panels, autosave and save. When it shows a lot, the buttons get smaller so everything fits and nothing overlaps; you can also pick a button size. Anything you hide is still in the **⋯** menu and on its keyboard shortcut.
 - **Palm rejection:** your palm is ignored while the pen is near the screen.
 - **Undo and redo:** Ctrl+Z and Ctrl+Y, or the arrows in the toolbar.
 
@@ -237,7 +240,40 @@ Pictures copied in other apps (screenshots, photos) paste too, at their normal o
 
 They sit next to each other, or one above the other when the window is taller than it is wide (a tablet held upright). Clicking a PDF in the file list opens it in the PDF in use (or goes to it if it's already open). Your palm is ignored on every PDF while the pen is writing in one of them. When you start the app again, the same PDFs open side by side, in the same order and sizes.
 
-### 11. Select and copy text
+### 11. Lasso: select several markups
+
+1. Choose **Lasso** (**L**), or with any tool just hold the pen's **side button**.
+2. Draw round the markups you want, or scribble over them. Anything at least half inside your loop, or that you drew over, is selected: pen strokes, highlights, shapes, text, signatures, pictures, measurements and erase areas. With the Lasso tool a finger works too (two fingers still pan and zoom). A tap selects the one markup under it.
+3. A dashed frame shows the selection, with a bar: **Copy**, **Duplicate**, **Delete**.
+   - **Move:** drag inside the frame (finger, pen or mouse), or use the arrow keys (**Shift** for bigger steps).
+   - **Resize:** drag a corner. Everything grows or shrinks together and keeps its proportions; pen strokes get thicker or thinner and text bigger or smaller with it.
+   - **Copy / Cut / Paste:** **Copy** on the bar (or **Ctrl+C**, **Ctrl+X**). To paste, press and hold the page (or right-click) → **Paste here**, or press **Ctrl+V** where the pointer is, or **⋯ → Paste**. It can go on another page or into another PDF open side by side, and comes in selected so you can place it.
+   - **Duplicate** (**Ctrl+D**) puts a copy just next to it. **Delete** (or the **Delete** key) removes them all.
+4. Tap the paper (or press **Esc**) to let go.
+
+Each move, resize, paste or delete is one undo step. **⋯ → Select all markups on this page** (**Ctrl+Shift+A**) selects everything on the page in view.
+
+### 12. Search in a PDF
+
+Press **Ctrl+F** (or the magnifier in the toolbar) and type. Every match is marked on the pages, the current one in orange, and the bar shows *3 of 27*.
+
+- **Enter** or **↓** goes to the next match, **Shift+Enter** or **↑** to the previous one (**F3** / **Shift+F3** also work).
+- The **list** button shows every match in the side panel's **Search** tab, with the words around it, page by page. Tap one to go there.
+- **Esc** or **×** closes the search and clears the marks.
+
+The search ignores capitals and extra spaces, and starts with the matches from the page you're reading. It runs a few pages at a time in the background, so the first matches show up straight away even in a 500-page PDF, and you can keep working while it finishes. With PDFs side by side it searches the one in use. **Ctrl+Shift+F** filters the file list instead.
+
+### 13. The markups list
+
+Click the **Markups** button at the top right (or the **Markups** tab in the side panel, or **Ctrl+Shift+M**). Every markup in the PDF is listed page by page: what it is (pen, marker, highlight, box, arrow, text, callout, signature, picture, measurement, erase area, edited text), in its colour, with its words (a text box's text, the highlighted words, a measurement's value), who made it and when.
+
+- Choose a kind at the top to see only those (for example *Highlights* or *Measurements*).
+- Tap one to go to it and select it.
+- The list keeps up as you add, change or delete markups.
+
+Only the markups list's tab does any work while it's showing, and after an edit only the pages that changed are read again.
+
+### 14. Select and copy text
 
 1. Choose **Select** (**V**).
 2. Drag over the text you want. A selection can run across several pages, and it scrolls the page when you drag near the edge.
@@ -248,7 +284,7 @@ They sit next to each other, or one above the other when the window is taller th
 
 Click on blank paper or press **Esc** to clear the selection.
 
-### 12. Measure drawings
+### 15. Measure drawings
 
 1. **Choose Measure** (**R**). A measuring bar appears at the bottom of the page.
 2. **Set the drawing's scale.** Click the scale button on the left of the measuring bar. It says *Scale not set* until you set one.
@@ -274,11 +310,12 @@ Each measurement is saved into the PDF as a standard PDF measurement markup, wit
 
 > A measurement is only as accurate as the scale. For drawings marked *NTS* (not to scale), or ones that may have been printed or scanned at a different size, calibrate against a known dimension first.
 
-### 13. Save and embed
+### 16. Save and embed
 
 - **Ctrl+S** (or the save button) writes your markups into the PDF as standard annotations. Acrobat, Edge, Bluebeam and other PDF apps show them too, and they stay movable and editable.
 - **Ctrl+Shift+S** saves a copy under a new name.
 - A blue dot next to the file name means there are unsaved changes. The app asks before you close or switch files with unsaved changes.
+- **Autosave:** **⋯ → Autosave** (or add the autosave button to the toolbar) turns it on or off. When it's on, each open PDF saves itself a few seconds after you stop making changes, never while you're writing, typing or placing something, and closing or switching files just saves without asking. Two things still wait for you to press **Ctrl+S**: erase areas and retyped text, because applying them can't be undone. If another program changed the file, autosave pauses and tells you, rather than overwriting it.
 - If another program changed the file after you opened it, the app asks before overwriting those changes.
 
 **Embed markups** (**⋯ → Embed markups…**) makes highlights, drawings, shapes, text, callouts, signatures and pasted pictures part of the pages. After that they can't be moved, edited or deleted, in this app or any other PDF app. Use it when you send out a final, signed or marked-up copy. Erase areas are applied at the same time, and form fields stay fillable. You choose:
@@ -304,18 +341,22 @@ The defaults:
 
 | Keys | Action |
 |---|---|
-| V · H · M · P · B · S · E · C · X · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Snip · Edit content · Measure |
+| V · H · M · P · B · S · E · L · C · X · R | Select · Pan · Highlight · Pen · Shapes · Signature · Eraser · Lasso · Snip · Edit content · Measure |
 | T | Finger draws on/off |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / Redo |
-| Ctrl+C / Ctrl+A | Copy selected text / Select all text on the page |
-| Ctrl+V | Paste a snipped picture at the same size (or tap the page with the Snip tool) |
-| Enter or F2 · Delete or Backspace | Edit the selected text box or callout · delete the selected markup or signature |
+| Ctrl+C / Ctrl+X / Ctrl+D | Copy selected text or markups / cut markups / duplicate markups |
+| Ctrl+A · Ctrl+Shift+A | Select all text on the page · select all markups on the page |
+| Ctrl+V | Paste what you copied last: markups, or a picture at the same size |
+| Ctrl+F · F3 / Shift+F3 | Search in the PDF · next / previous match |
+| Arrow keys (Shift: further) | Move markups selected with the lasso |
+| Enter or F2 · Delete or Backspace | Edit the selected text box or callout · delete the selected markups |
 | Ctrl + / Ctrl − / Ctrl+0 / Ctrl+9 / Ctrl+1 | Zoom in / out / fit width / fit page / 100% |
 | PgUp / PgDn / Space · Home / End | Scroll a screen · first / last page |
 | Ctrl+G | Go to page (number or name) |
 | Alt+↑ / Alt+↓ | Previous / next PDF in the list |
-| Ctrl+O · Ctrl+F · Ctrl+B · F5 | Open folder · filter files · show/hide the file list · refresh it |
+| Ctrl+O · Ctrl+Shift+F · Ctrl+B · F5 | Open folder · filter files · show/hide the file list · refresh it |
+| Ctrl+Shift+M | Show/hide the markups list |
 | Ctrl+Shift+P · Delete (in the panel) | Show/hide the Pages panel · delete the selected pages |
 | Ctrl+Shift+O · Ctrl+W · Ctrl+Tab / Ctrl+Shift+Tab | Open a PDF side by side · close the PDF in use · go to the next / previous PDF side by side |
 | F11 · F1 · Ctrl+K | Full screen · help · keyboard shortcuts |
@@ -327,7 +368,7 @@ These keys always do the same thing in their situation:
 | Enter · Backspace · Esc | Finish · remove last point · cancel (while measuring) |
 | Enter · Shift+Enter · Esc | Finish · new line · cancel a text box or callout you're typing |
 | Enter · Esc | Place · cancel the signature you're positioning |
-| Esc | Deselect a markup, close a menu, clear a text selection |
+| Esc | Deselect markups, close a menu or the search, clear a text selection |
 | Shift (while drawing a line or measuring) | Keep it at 0°, 45° or 90° |
 
 ## Troubleshooting
@@ -359,15 +400,16 @@ Eagles PDF viewer is an [Electron](https://www.electronjs.org/) app that renders
 |---|---|
 | `app/worker.js` | MuPDF (WebAssembly) engine. One *edit* worker owns annotations, text lookup, text selection and saving; 2–4 *render* workers rasterize 512px tiles in parallel. |
 | `app/engine.js` | Worker pool and priority render queue. The viewer replaces the queue on every view change, so stale work gets dropped. |
-| `app/viewer.js` | Continuous page layout. Pan and pinch run as GPU transforms, and the pages are re-tiled at the new resolution once a gesture settles. Annotations are live SVG vectors, so drawing never forces a page re-render. Also handles text selection and the measuring tool. |
+| `app/viewer.js` | Continuous page layout. Pan and pinch run as GPU transforms, and the pages are re-tiled at the new resolution once a gesture settles. Annotations are live SVG vectors, so drawing never forces a page re-render. Also handles text selection, the measuring tool, the lasso and its group selection, and search marks. |
 | `app/measure.js` | Drawing scales, units, label formatting and polygon geometry for the measuring tool. |
 | `app/shortcuts.js` | Key combos by physical key position, display names, and the keymap of user overrides on top of the defaults. Every command and its default keys live in the `COMMANDS` list in `app/main.js`. |
 | `app/sigproc.js` | Signature background removal: paper colour from the image border, automatic threshold (Otsu), soft edges, paper-tint removal at stroke edges, ink recolouring, crop and PNG export. |
 | `app/sidebar.js` | Virtualized folder tree, so thousands of files stay instant. Ctrl/Shift+click or Select mode picks files to merge. |
+| `app/markups.js` | The markups list: per open PDF, summaries read from the edit worker a few dozen pages at a time, only while the list is showing; after an edit only the pages that changed are read again. |
 | `app/pages.js` | The Pages panel: virtualized thumbnails (rendered by the render workers only when the page view is idle, straight from the page), the current-page highlight, page names, selection, drag (grip, or press and hold) to reorder or onto another open PDF to copy. It follows the PDF in use and keeps each open PDF's thumbnails. |
 | `app/inkgeom.js` | Pressure strokes: width from pen pressure and the stroke's outline, shared by the viewer and the engine. |
 | `electron/fontindex.js` | Finds the installed font file matching a PDF font name, for retyping text in the same font. |
-| `app/main.js` | Toolbar, dialogs, shortcuts, settings, scales, the open/save flow, snip and paste, and the open PDFs (panes) side by side. |
+| `app/main.js` | Toolbar (customizable, sized to fit), dialogs, shortcuts, settings, scales, the open/save flow and autosave, snip, copy and paste, search, and the open PDFs (panes) side by side. |
 | `electron/` | Desktop shell: `app://` protocol, file IPC, clipboard, folder watcher, single instance, and Windows title bar. |
 | `windows/` | Installer scripts (`Setup.cmd`, shipped as `Install Eagles PDF viewer.cmd`, plus `setup.ps1` for the small package; `Install.cmd` for the full zip) and the readme that ships with them. |
 | `tools/devserver.js` | Runs the same UI in a normal browser for testing. |
@@ -383,6 +425,12 @@ Page names come from the PDF's page labels (`/PageLabels`, ignored where they're
 The Snip tool asks the edit worker to render just the snipped rectangle (page content, markups and form fields) at the zoom you see it at or at least 144 dpi, capped at 16 megapixels. A lasso is cut out with a canvas clip, which leaves the outside transparent. The PNG goes to the system clipboard together with a small HTML part that marks it as the app's own snip, so pasting it back uses its exact size in points. A pasted picture is a `Stamp` annotation with the image as its appearance, like a signature.
 
 Each open PDF is a pane: its own `Engine` (edit worker plus render workers: the first one gets 2–4, others opened side by side get 2), its own `Viewer`, file state and undo history. In `app/main.js`, `engine`, `viewer`, `state` and `docHist` always name the active pane's (the one touched last; a capture-phase `pointerdown` switches it before the viewer sees the touch), and async work such as opening, saving and page changes keeps its own pane, so switching mid-way can't send it to the wrong PDF. Panes opened side by side start their workers on demand and terminate them when closed. The viewers share the tile-memory budget (`setShare`) and the pen's last activity, so palm rejection works across PDFs. Pages dropped on another pane are copied with the `insert` page operation, from a snapshot of the source document as it is (unsaved markups included). The open files, their order and sizes are saved as `openFiles` / `paneWeights` and reopened at start.
+
+The lasso (the Lasso tool, or a pen with its barrel button held, `buttons & 2`; the eraser end is `buttons & 32`) picks the markups on that page with at least half of their sample points inside the loop, or that the stroke passed over. While a group is dragged its SVG nodes get a `transform` (no redrawing); on release each markup's geometry is moved or uniformly scaled (points, boxes, ink with its widths, callout lines, highlight quads, text size, measurement values) and sent to the edit worker as in-place updates, all in one undo step. Copies are plain annotation data (with the image for pictures), so they paste on any page of any open PDF; the system clipboard gets a small marker so Paste knows whether markups or a picture were copied last.
+
+Search runs in the edit worker a chunk of pages at a time (about 50 ms each, so other work gets in between), on each page's structured text, opened only for the search so the page cache doesn't grow. Matches are case-insensitive, treat runs of spaces as one and stay within a line. Their rectangles are drawn in a separate SVG layer per page, only for pages on screen.
+
+Autosave uses the same incremental save as Ctrl+S, a few seconds after the last change and only when nothing is in progress; it skips erase areas and retyped text, which need a full rewrite and can't be undone, and never overwrites a file changed by another program. The toolbar's buttons are sized by a CSS variable (`--b`): `fitToolbar` tries 40 px down to 26 px until nothing overflows.
 
 Measurements are saved as `Line`, `PolyLine` and `Polygon` annotations. Each one has a dimension intent (`LineDimension`, `PolyLineDimension` or `PolygonDimension`), a standard `/Measure` dictionary and an `InkleafMeasure` key that holds the scale.
 

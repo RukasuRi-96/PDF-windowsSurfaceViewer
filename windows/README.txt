@@ -33,7 +33,8 @@ TOUCH & PEN
   Two-finger pinch ....... zoom around your fingers
   Double-tap ............. zoom in / back to fit width
   Pen .................... uses the selected tool
-  Pen eraser / side button erase
+  Pen eraser end ......... erase
+  Pen side button (hold) . lasso: select markups (any tool)
   Resting your palm while the pen is near the screen is ignored.
   The finger button in the toolbar (or T) lets one finger draw instead.
 
@@ -46,8 +47,9 @@ MOUSE
 
 TOOLS (tap the active tool again for colors and thickness)
   Select (V)  Pan (H)  Highlight (M)  Pen (P)  Shapes (B)  Signature (S)
-  Eraser (E)  Snip (C)  Edit content (X)  Measure (R)
-  Highlight snaps to text; where there is no text it becomes a marker.
+  Eraser (E)  Lasso (L)  Snip (C)  Edit content (X)  Measure (R)
+  Highlight: in its colour menu choose Words (snaps to text; where
+  there is no text it becomes a marker) or Draw (a freehand marker).
   Drawing tools always draw, even on top of other markups.
 
 SELECT, MOVE, EDIT OR DELETE A MARKUP (V)
@@ -115,7 +117,28 @@ SNIP: COPY PART OF A PAGE AS A PICTURE (C)
   proportions), Delete removes it.
 
 PRESS AND HOLD THE PAGE (or right-click)
-  Paste picture here, Snip, Open a PDF side by side, Close this PDF.
+  Paste here, Snip, Lasso, Select all markups on this page, Open a PDF
+  side by side, Close this PDF.
+
+LASSO: SELECT SEVERAL MARKUPS (L, or hold the pen's side button)
+  Draw round markups, or over them. Then drag inside the frame to move
+  them, drag a corner to resize them (proportions kept), or use the bar:
+  Copy, Duplicate, Delete. Paste with press and hold > "Paste here" (or
+  Ctrl+V), on any page of any open PDF. Arrow keys nudge them. Each
+  change is one undo step.
+
+SEARCH (Ctrl+F)
+  Type words: every match is marked, Enter / Shift+Enter (or the
+  arrows) go to the next / previous one, the list button shows them all
+  with their context. Esc closes it.
+
+MARKUPS LIST (Markups button, top right, or Ctrl+Shift+M)
+  Every markup in the PDF, page by page, with its words and colour.
+  Choose a kind at the top; tap one to go to it and select it.
+
+TOOLBAR: More (...) > Customize the toolbar (or right-click it)
+  Tick the buttons to show. With many, the buttons get smaller so all
+  fit. Hidden ones stay in the More (...) menu and on their keys.
 
 SIDE BY SIDE: UP TO FOUR PDFS AT ONCE
   Right-click a PDF in the file list (with a finger: press and hold)
@@ -140,6 +163,10 @@ SAVING
   Ctrl+S saves the annotations straight into the PDF as standard PDF
   annotations, so they show up in Acrobat, Edge, Bluebeam, etc.
   Ctrl+Shift+S = Save as.  Ctrl+Z / Ctrl+Y = undo / redo.
+  Autosave: More (...) > Autosave. Each PDF then saves itself a few
+  seconds after you stop. Erase areas and retyped text still wait for
+  Ctrl+S (they can't be undone), and a file changed by another program
+  is never overwritten without asking.
 
 EMBED MARKUPS: More (...) > Embed markups...
   Makes highlights, drawings, shapes, text, signatures and pictures
@@ -151,7 +178,7 @@ CHANGE ANY SHORTCUT: More (...) > Keyboard shortcuts (Ctrl+K)
   Search for a command, click "Add shortcut", press the keys you want.
 
 OTHER KEYS
-  Ctrl+O open folder   Ctrl+F filter files   Ctrl+B show/hide file list
+  Ctrl+O open folder   Ctrl+Shift+F filter files   Ctrl+B file list
   Alt+Up / Alt+Down previous / next PDF   Ctrl+0 fit width   Ctrl+9 fit page
   F11 full screen
 

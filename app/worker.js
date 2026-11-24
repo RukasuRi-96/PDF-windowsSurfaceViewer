@@ -452,6 +452,7 @@ function createShape(p, data) {
   }
   setShapeProps(a, k, data, info);
   if (author) { try { a.setAuthor(author); } catch {} }
+  try { a.setModificationDate(new Date()); } catch {}
   return finishShape(a, k, data, info);
 }
 
@@ -459,6 +460,19 @@ function createShape(p, data) {
 function updateShape(p, id, data) {
   const a = findAnnot(p, id);
   if (!a) throw new Error("That markup is no longer in the document");
+  // Text highlights and measurements: moved or resized with other markups.
+  if (!data.shape && (data.type === "Highlight" || data.measure)) {
+    if (data.type === "Highlight") a.setQuadPoints(data.quads);
+    else {
+      if (data.type === "Line") a.setLine(data.pts[0], data.pts[1]);
+      else a.setVertices(data.pts);
+      a.setContents(data.contents || "");
+      writeMeasure(a, data);
+    }
+    try { a.setModificationDate(new Date()); } catch {}
+    a.update();
+    return { bounds: Array.from(a.getBounds()) };
+  }
   const k = data.shape ? data.shape.k : data.type === "Ink" ? "ink" : "box";
   const info = data.shape ? Object.assign({ v: 1 }, shapeInfo(a) || {}, { k }) : null;
   setShapeProps(a, k, data, info || {});
@@ -609,6 +623,7 @@ async function createRetext(p, page, data) {
   a.setRect(R.rect);
   a.getObject().put(SHAPE_KEY, doc.newString(JSON.stringify(R.store)));
   if (author) { try { a.setAuthor(author); } catch {} }
+  try { a.setModificationDate(new Date()); } catch {}
   a.update();
   return { id: a.getObject().asIndirect(), bounds: R.rect, rect: R.rect, svg: R.svg };
 }
@@ -873,6 +888,109 @@ let docPassword = null;
 // Each change is made to the open document, which is then rewritten in
 // memory (dropping removed pages' content) and reopened; the renderers reopen
 // the same bytes. The state before the change comes back for undo.
+// ---- search ---------------------------------------------------------------
+// Case-insensitive, runs of spaces count as one; a match stays within a line.
+// Pages are opened only for the search (not kept), so a long PDF doesn't fill
+// the page cache.
+const normFind = (t) => String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+function searchPage(i, want) {
+  const e = pages.get(i);
+  const page = e ? e.page : doc.loadPage(i);
+  const st = e?.stext || page.toStructuredText("preserve-whitespace");
+  const hits = [];
+  try {
+    let chars = null, quads = null;
+    st.walk({
+      beginLine() { chars = []; quads = []; },
+      onChar(c, origin, font, size, quad) { chars.push(c); quads.push(quad); },
+      endLine() {
+        if (!chars || !chars.length || hits.length >= 500) return;
+        // Lower-case text with runs of spaces collapsed, mapped back to characters.
+        let low = "", map = [], orig = "", omap = [];
+        for (let k = 0; k < chars.length; k++) {
+          const c = chars[k];
+          if (/\s/.test(c)) {
+            if (low.endsWith(" ") || !low) continue;
+            low += " "; map.push(k); omap[k] = orig.length; orig += " ";
+            continue;
+          }
+          const l = c.toLowerCase();
+          low += l;
+          for (let u = 0; u < l.length; u++) map.push(k);
+          omap[k] = orig.length;
+          orig += c;
+        }
+        let at = low.indexOf(want);
+        while (at >= 0 && hits.length < 500) {
+          const k0 = map[at], k1 = map[at + want.length - 1];
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (let k = k0; k <= k1; k++) {
+            const q = quads[k];
+            for (let v = 0; v < 8; v += 2) { x0 = Math.min(x0, q[v]); x1 = Math.max(x1, q[v]); y0 = Math.min(y0, q[v + 1]); y1 = Math.max(y1, q[v + 1]); }
+          }
+          // A little of the line around it, for the results list.
+          const s0 = omap[k0], s1 = omap[k1] + chars[k1].length;
+          const a = Math.max(0, s0 - 36), b = Math.min(orig.length, s1 + 44);
+          hits.push({ rect: [x0, y0, x1, y1].map((v) => Math.round(v * 100) / 100), text: (a ? "…" : "") + orig.slice(a, b) + (b < orig.length ? "…" : ""), at: s0 - a + (a ? 1 : 0), len: s1 - s0 });
+          at = low.indexOf(want, at + Math.max(1, want.length));
+        }
+      },
+    });
+  } finally {
+    if (!e?.stext) st.destroy();
+    if (!e) page.destroy();
+  }
+  return hits;
+}
+
+// ---- the markups list ------------------------------------------------------
+function markKind(a, type, shape) {
+  if (shape) return shape.k;
+  if (type === "Ink") return a.getOpacity() < 1 ? "marker" : "ink";
+  if (type === "Highlight") return "highlight";
+  if (type === "Square") return "box";
+  if (MEASURE_TYPES.has(type) && measureInfo(a)) return "measure";
+  return type.toLowerCase();
+}
+
+function markSummary(i, page) {
+  const out = [];
+  let st = null;
+  try {
+    for (const a of page.getAnnotations()) {
+      if (!isManaged(a)) continue;
+      const type = a.getType(), shape = SHAPE_TYPES.has(type) ? shapeInfo(a) : null, k = markKind(a, type, shape);
+      let text = "", color = null;
+      try {
+        if (type === "FreeText") { text = a.getContents() || ""; color = colorOf(a.getDefaultAppearance().color); }
+        else color = colorOf(a.getColor());
+      } catch {}
+      if (k === "measure") text = (a.getContents() || "").split(/\r?\n/)[0];
+      else if (k === "retext") text = shape.text || "";
+      else if (k === "highlight") {
+        // The highlighted words.
+        try {
+          const q = a.getQuadPoints();
+          if (q.length) {
+            st ||= page.toStructuredText("preserve-whitespace");
+            const f = q[0], l = q[q.length - 1];
+            text = st.copy([f[0] + 0.5, (f[1] + f[5]) / 2], [l[2] - 0.5, (l[3] + l[7]) / 2]) || "";
+          }
+        } catch {}
+      }
+      let author = "", date = 0;
+      try { author = a.getAuthor() || ""; } catch {}
+      // (An unset date comes back as the start of 1970: leave it out.)
+      try { const m = a.getModificationDate(); date = m && +m > 631152000000 ? +m : 0; } catch {}
+      out.push({ page: i, id: a.getObject().asIndirect(), k, color, text: text.replace(/\s+/g, " ").trim().slice(0, 160), author, date, rect: Array.from(a.getBounds()) });
+    }
+  } finally {
+    try { st?.destroy(); } catch {}
+  }
+  return out;
+}
+
 // The PDF pages are copied from: a file, or (`bytes`) another open PDF as it
 // is now, with its unsaved markups.
 async function loadSource(url, password, bytes) {
@@ -1046,6 +1164,29 @@ const handlers = {
     return structureResult(before);
   },
   // Number of pages in another PDF (to choose pages to copy from it).
+  // Search pages from `from` on for up to `budget` ms; `next` is where to
+  // carry on (-1 when done).
+  search({ needle, from, budget = 50 }) {
+    const want = normFind(needle), n = doc.countPages(), t0 = performance.now(), out = [];
+    if (!want) return { result: { pages: [], next: -1 } };
+    let i = Math.max(0, from);
+    for (; i < n && (i === from || performance.now() - t0 < budget); i++) {
+      const hits = searchPage(i, want);
+      if (hits.length) out.push({ page: i, hits });
+    }
+    return { result: { pages: out, next: i < n ? i : -1 } };
+  },
+  // Every markup on pages from..to-1, for the markups list.
+  markList({ from, to }) {
+    const out = [], n = doc.countPages();
+    if (!doc.isPDF()) return { result: out };
+    for (let i = Math.max(0, from); i < Math.min(n, to); i++) {
+      const e = pages.get(i);
+      const page = e ? e.page : doc.loadPage(i);
+      try { out.push(...markSummary(i, page)); } finally { if (!e) page.destroy(); }
+    }
+    return { result: out };
+  },
   // The open document as it is now (markups included), to copy pages from.
   snapshot() {
     const b = snapshot("");
@@ -1095,6 +1236,7 @@ const handlers = {
     if (data.shape) return { result: createShape(p, data) };
     const a = p.createAnnotation(data.type);
     if (author) { try { a.setAuthor(author); } catch {} }
+    try { a.setModificationDate(new Date()); } catch {}
     a.setColor(data.color);
     if (data.opacity != null && data.opacity < 1) a.setOpacity(data.opacity);
     if (data.type === "Ink") {

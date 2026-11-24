@@ -103,6 +103,25 @@ const MM = 72 / 25.4;
   await p2.waitForTimeout(800);
   const pic = await p2.evaluate((i) => { const d = (window.__inkleaf.viewer.doc.annots.get(i) || []).at(-1); if (!d) return null; return d.shape && d.shape.k === 'image' ? [d.rect[2] - d.rect[0], d.rect[3] - d.rect[1]] : null; }, z[3]);
   console.log('snip: system clipboard has the picture', cb.image, '· marked as ours', cb.marked, '· pasted at the same size', !!pic && Math.abs(pic[0] - 200 / z[2]) < 1.5 && Math.abs(pic[1] - 120 / z[2]) < 1.5);
+  // Lasso with the pen's side button round the pasted picture, Ctrl+C: the
+  // system clipboard says markups were copied, and Ctrl+V pastes them.
+  const pc = await p2.evaluate((i) => { const v = window.__inkleaf.viewer, d = v.doc.annots.get(i).at(-1); v.rect = v.root.getBoundingClientRect(); const s = v._screenOf(i, [(d.rect[0] + d.rect[2]) / 2, (d.rect[1] + d.rect[3]) / 2]); return [s[0] + v.rect.left, s[1] + v.rect.top]; }, z[3]);
+  const cdp2 = await p2.context().newCDPSession(p2);
+  const lp = []; for (let k = 0; k <= 30; k++) { const a = k / 30 * 2 * Math.PI; lp.push([pc[0] + 150 * Math.cos(a), pc[1] + 100 * Math.sin(a)]); }
+  const penEv = (type, [x, y], button, buttons) => cdp2.send('Input.dispatchMouseEvent', { type, x, y, pointerType: 'pen', force: 0.5, button, buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
+  await penEv('mouseMoved', lp[0], 'none', 0);
+  await penEv('mousePressed', lp[0], 'right', 2);
+  for (const q of lp.slice(1)) { await penEv('mouseMoved', q, 'right', 2); await p2.waitForTimeout(8); }
+  await penEv('mouseReleased', lp[lp.length - 1], 'right', 0);
+  await p2.waitForTimeout(300);
+  const lassoed = await p2.evaluate(() => window.__inkleaf.viewer.groupCount);
+  await p2.keyboard.press('Control+c');
+  await p2.waitForTimeout(500);
+  const cb2 = await app2.evaluate(async ({ clipboard }) => { const [it] = await clipboard.read(); return it && it.types.includes('text/html') ? await (await it.getType('text/html')).text() : ''; });
+  const before = await p2.evaluate((i) => window.__inkleaf.viewer.doc.annots.get(i).length, z[3]);
+  await p2.keyboard.press('Control+v');
+  await p2.waitForTimeout(600);
+  console.log('lasso (pen side button):', lassoed, 'selected · Ctrl+C marks the clipboard', /data-eagles-marks/.test(cb2), '· Ctrl+V pasted', (await p2.evaluate((i) => window.__inkleaf.viewer.doc.annots.get(i).length, z[3])) - before);
   await p2.keyboard.press('Control+s');
   await p2.waitForFunction(() => !window.__inkleaf.viewer.dirty, null, { timeout: 15000 });
   // Side by side

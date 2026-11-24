@@ -102,6 +102,10 @@ export class Engine {
   restore(bytes) { return this._edit(() => this.edit.call("restore", { bytes }, [bytes.buffer])).then((r) => this._structure(r)); }
   // An area of a page as a PNG ({ png, w, h }), markups included.
   snip(page, rect, res) { return this._edit(() => this.edit.call("snip", { page, rect, res })); }
+  // Search (a chunk of pages at a time): { pages: [{ page, hits }], next }.
+  find(needle, from) { return this.edit.call("search", { needle, from }); }
+  // Markups on pages from..to-1 (after any edits still being made).
+  markList(from, to) { return this._edit(() => this.edit.call("markList", { from, to })); }
   // The open document as it is now, markups included (bytes).
   snapshot() { return this._edit(() => this.edit.call("snapshot")); }
   countPagesOf(url, password) { return this.edit.call("countPagesOf", { url, password }); }

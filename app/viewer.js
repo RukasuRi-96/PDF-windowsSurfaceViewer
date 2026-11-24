@@ -126,7 +126,7 @@ function dotCursor(color, px) {
 }
 
 // Tools a finger uses when "finger draws" is on (otherwise a finger pans).
-const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure", "content", "snip"]);
+const DRAW_TOOLS = new Set(["pen", "highlight", "box", "eraser", "select", "measure", "content", "snip", "lasso"]);
 // Signatures and pasted pictures: images that keep their proportions.
 const isPic = (k) => k === "sig" || k === "image";
 const FONT_CSS = { Helv: "Helvetica, Arial, sans-serif", TiRo: '"Times New Roman", Times, serif', Cour: '"Courier New", Courier, monospace' };
@@ -140,6 +140,42 @@ function faceCss(face = {}) {
   const generic = face.mono ? "monospace" : face.serif ? "serif" : "sans-serif";
   const base = face.family || String(face.name || "").replace(/^[A-Z]{6}\+/, "").split(/[,-]/)[0].replace(/(PSMT|PS|MT)$/, "");
   return { family: (base ? `"${base.replace(/"/g, "")}", ` : "") + generic, weight: face.bold ? "700" : "400", style: face.italic ? "italic" : "normal" };
+}
+
+// Is point p inside polygon `poly` (even-odd)?
+function inPoly(p, poly) {
+  let inside = false;
+  for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+    const [xi, yi] = poly[k], [xj, yj] = poly[j];
+    if ((yi > p[1]) !== (yj > p[1]) && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// A markup's geometry moved and scaled by `f` (a point mapping) with scale
+// factor `s`: points, boxes, strokes, highlight quads; pen widths and text
+// sizes follow the scale. Works on markups and on plain copies of them.
+function xformGeo(g, f, s, kind) {
+  const P = (p) => f(p).map(round2);
+  if (g.pts) g.pts = g.pts.map(P);
+  if (g.ink) g.ink = g.ink.map((st) => st.map(P));
+  if (g.callout) g.callout = g.callout.map(P);
+  if (g.rect) { const a = f([g.rect[0], g.rect[1]]), b = f([g.rect[2], g.rect[3]]); g.rect = [a[0], a[1], b[0], b[1]].map(round2); }
+  if (g.quads) {
+    g.quads = g.quads.map((q) => {
+      const o = [];
+      for (let k = 0; k < 8; k += 2) { const r = f([q[k], q[k + 1]]); o.push(round2(r[0]), round2(r[1])); }
+      return o;
+    });
+  }
+  if (s !== 1) {
+    if (kind === "ink") {
+      if (g.width) g.width = Math.round(g.width * s * 1000) / 1000;
+      if (g.widths) g.widths = g.widths.map((w) => Math.round(w * s * 1000) / 1000);
+    }
+    if ((kind === "text" || kind === "callout") && g.size) g.size = Math.max(4, Math.round(g.size * s * 10) / 10);
+  }
+  return g;
 }
 
 // Share of rect `r` lying inside rect `by`.
@@ -183,7 +219,7 @@ export class Viewer {
     this.tool = "hand";
     this.styles = {
       pen: { color: [0.1, 0.3, 0.85], width: 1.5 },
-      highlight: { color: [1, 0.86, 0.1], width: 12 },
+      highlight: { color: [1, 0.86, 0.1], width: 12, mode: "words" }, // words: snaps to text; draw: freehand
       box: { color: [0.86, 0.15, 0.15], width: 2 },
     };
     this.shape = "box";          // box tool: box | line | arrow | cloud | callout | text
@@ -282,6 +318,7 @@ export class Viewer {
   close() {
     this._closeEditor(false);
     this.deselectShape();
+    this.clearGroup();
     this.finishPlacing(false);
     this._stopInertia();
     this.action = null;
@@ -572,7 +609,58 @@ export class Viewer {
     s.prevMeas = svgEl("g", {}, s.svgMeas);
     d.states.set(i, s);
     this._loadAnnots(i);
+    if (this.findHits?.has(i)) this._drawFind(i, s);
     return s;
+  }
+
+  // ---- search hits: rects per page, the current one picked out
+  setFindHits(byPage, cur) {
+    const old = this.findHits;
+    this.findHits = byPage && byPage.size ? byPage : null;
+    this.findCur = cur || null;
+    if (!this.doc) return;
+    for (const [i, s] of this.doc.states) if (old?.has(i) || this.findHits?.has(i)) this._drawFind(i, s);
+  }
+
+  _drawFind(i, s) {
+    const list = this.findHits?.get(i);
+    if (!list || !list.length) { s.svgFind?.remove(); s.svgFind = null; return; }
+    if (!s.svgFind) {
+      const p = this.doc.pages[i];
+      s.svgFind = svgEl("svg", { class: "annots find", viewBox: `${p.x0} ${p.y0} ${p.w} ${p.h}`, preserveAspectRatio: "none" });
+      s.el.insertBefore(s.svgFind, s.svgInk);
+    }
+    s.svgFind.textContent = "";
+    const c = this.findCur;
+    list.forEach((r, k) => {
+      const m = 0.6;
+      svgEl("rect", { x: r[0] - m, y: r[1] - m, width: r[2] - r[0] + 2 * m, height: r[3] - r[1] + 2 * m, rx: 1, class: c && c.page === i && c.k === k ? "cur" : "" }, s.svgFind);
+    });
+  }
+
+  // Scroll so that rect r on page i is in view (left alone if it already is).
+  revealRect(i, r) {
+    if (!this.doc) return;
+    this._stopInertia();
+    const L = this.L, P = this.doc.pages[i];
+    const x = L.left[i] + ((r[0] + r[2]) / 2 - P.x0) * this.scale, y = L.top[i] + ((r[1] + r[3]) / 2 - P.y0) * this.scale;
+    if (x > this.sx + 30 && x < this.sx + this.vw - 30 && y > this.sy + 70 && y < this.sy + this.vh - 90) return;
+    this.scrollTo(x - this.vw / 2, y - this.vh * 0.4);
+  }
+
+  // Go to a markup (from the markups list) and select it.
+  async revealMark(i, id) {
+    if (!this.doc) return false;
+    const doc = this.doc;
+    await this._loadAnnots(i);
+    if (this.doc !== doc) return false;
+    const d = (doc.annots.get(i) || []).find((x) => x.id === id);
+    if (!d) { this.goToPage(i); return false; }
+    const r = this._selBox(this._snap(d), this._kindOf(d), d) || d.bounds;
+    if (r) this.revealRect(i, r); else this.goToPage(i);
+    this.clearGroup();
+    this.selectShape(i, d);
+    return true;
   }
 
   _positionPage(s, i) {
@@ -960,6 +1048,7 @@ export class Viewer {
       if (this.sel && tool !== "select") this.clearSelection();
       this._closeEditor(true);
       this.deselectShape();
+      if (tool !== "lasso" && tool !== "select") this.clearGroup();
       if (this.placing) this.finishPlacing(false);
     }
     this.tool = tool;
@@ -995,8 +1084,14 @@ export class Viewer {
     Object.assign(this.textStyle, style);
   }
 
+  // The Surface Pen's eraser end (its top button pressed onto the screen).
   _isEraser(e) {
-    return e.pointerType === "pen" && ((e.buttons & 32) || e.button === 5 || (e.buttons & 2) || e.button === 2);
+    return e.pointerType === "pen" && ((e.buttons & 32) || e.button === 5);
+  }
+
+  // The pen's side (barrel) button held down: lasso select.
+  _isBarrel(e) {
+    return e.pointerType === "pen" && ((e.buttons & 2) || e.button === 2);
   }
 
   _touchCount() {
@@ -1033,6 +1128,7 @@ export class Viewer {
     // Pen/mouse on the page outside the selected shape lets it go (a finger
     // still pans; a finger tap deselects).
     if (this.shapeSel && type !== "touch") this.deselectShape();
+    if (this.groupSel && type !== "touch") this.clearGroup();
 
     if (type === "touch") {
       const n = this._touchCount();
@@ -1046,7 +1142,8 @@ export class Viewer {
         return;
       }
       if (n > 2) { ptr.ignored = true; return; }
-      if (this.touchDraws && !this.placing && DRAW_TOOLS.has(this.tool)) { if (this._startTool(e, ptr, true)) return; }
+      // The Lasso tool selects with one finger (two pan and zoom).
+      if ((this.touchDraws || this.tool === "lasso") && !this.placing && DRAW_TOOLS.has(this.tool)) { if (this._startTool(e, ptr, true)) return; }
       this._startPan(ptr, true);
       return;
     }
@@ -1054,6 +1151,7 @@ export class Viewer {
     if (this.placing) { this._startPan(ptr, type === "pen"); return; }
     if (type === "pen") {
       if (this._isEraser(e)) { this._startErase(e, ptr, false); return; }
+      if (this._isBarrel(e)) { if (!this._startLasso(e, ptr, false)) this._startPan(ptr, true); return; }
       if (this.tool === "hand" || !this._startTool(e, ptr, false)) this._startPan(ptr, true);
       return;
     }
@@ -1088,6 +1186,7 @@ export class Viewer {
       case "measure": this._measureMove(a, e); break;
       case "pickmark": this._movePick(a, e); break;
       case "snip": this._moveSnip(a, e); break;
+      case "lasso": this._moveLasso(a, e); break;
     }
   }
 
@@ -1149,6 +1248,7 @@ export class Viewer {
       case "measure": this._measureUp(a, cancel); break;
       case "pickmark": if (!cancel) this.selectShape(a.page, a.d); break;
       case "snip": this._finishSnip(a, cancel); break;
+      case "lasso": this._finishLasso(a, cancel); break;
       case "pinch": this._ztCommit(this.vw / 2, this.vh / 2); break;
     }
   }
@@ -1196,6 +1296,7 @@ export class Viewer {
       this._signTap(ptr);
       return;
     }
+    if (tapLike && this.groupSel) { this.clearGroup(); return; }
     if (tapLike && this.tool === "select" && this._shapeTap(ptr)) return;
     if (tapLike && this.tool === "content") { this._replaceTap(ptr); return; }
     // Snip tool: a tap puts the copied picture there.
@@ -1291,6 +1392,7 @@ export class Viewer {
     if (this.tool === "eraser") { this._startErase(e, ptr, touch); return true; }
     if (this.tool === "select") return this._startSelect(e, ptr, touch);
     if (this.tool === "measure") return this._measureDown(e, ptr, touch);
+    if (this.tool === "lasso") return this._startLasso(e, ptr, touch);
     const i = this._pageForPointer(e);
     if (i < 0) return false;
     const p = this._clampToPage(i, this._clientToPage(i, e.clientX, e.clientY));
@@ -1535,6 +1637,8 @@ export class Viewer {
   _startHighlight(base, p, e) {
     const st = this.styles.highlight;
     const a = (this.action = { ...base, kind: "highlight", start: p, end: p, pts: [p], quads: [], color: st.color.slice(), width: st.width, mode: "pending", qseq: 0 });
+    // "Draw" mode: always a freehand marker, even over text.
+    if (st.mode === "draw") { a.mode = "marker"; this._refreshHighlight(a); return; }
     const known = this._onText(a.page, p);
     if (known === null) {
       this._loadText(a.page).then(() => {
@@ -1896,7 +2000,7 @@ export class Viewer {
 
   _snap(d) {
     const g = {};
-    for (const k of ["pts", "rect", "ink", "widths", "text", "size", "font", "color", "fill", "width", "callout", "origin", "erase", "face"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
+    for (const k of ["pts", "rect", "ink", "widths", "text", "size", "font", "color", "fill", "width", "callout", "origin", "erase", "face", "quads", "contents"]) if (d[k] != null) g[k] = JSON.parse(JSON.stringify(d[k]));
     return g;
   }
 
@@ -1909,6 +2013,7 @@ export class Viewer {
   }
 
   _applySnap(i, d, snap) {
+    this.cb.onMarks?.(i);
     Object.assign(d, JSON.parse(JSON.stringify(snap)));
     if (d.shape) d.svg = null;
     this._redrawAnnot(i, d);
@@ -2161,6 +2266,291 @@ export class Viewer {
     target.addEventListener("pointermove", move);
     target.addEventListener("pointerup", up);
     target.addEventListener("pointercancel", up);
+  }
+
+  // ---- lasso: select several markups at once, then move, resize, copy,
+  // duplicate or delete them together (one undo step each). Draw round them,
+  // or over them, with the Lasso tool or with the pen's side button held.
+  _startLasso(e, ptr, touch) {
+    const i = this._pageForPointer(e);
+    if (i < 0) return false;
+    this.clearGroup();
+    this.deselectShape();
+    const p = this._clampToPage(i, this._clientToPage(i, e.clientX, e.clientY));
+    this.action = { kind: "lasso", pid: ptr.id, page: i, touch, t0: now(), pts: [p], len: 0 };
+    return true;
+  }
+
+  _moveLasso(a, e) {
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of evs.length ? evs : [e]) {
+      const p = this._clampToPage(a.page, this._clientToPage(a.page, ev.clientX, ev.clientY));
+      const q = a.pts[a.pts.length - 1], d = Math.hypot(p[0] - q[0], p[1] - q[1]) * this.scale;
+      if (d >= 2) { a.pts.push(p); a.len += d; }
+    }
+    if (a.raf) return;
+    a.raf = requestAnimationFrame(() => {
+      a.raf = 0;
+      if (this.action !== a) return;
+      this._clearLive();
+      const c = this.liveCtx;
+      c.save();
+      c.beginPath();
+      a.pts.forEach((p, k) => { const [x, y] = this._screenOf(a.page, p); if (k) c.lineTo(x, y); else c.moveTo(x, y); });
+      c.fillStyle = "rgba(47, 111, 237, 0.08)";
+      c.fill();
+      c.setLineDash([6, 4]);
+      c.lineWidth = 1.5;
+      c.strokeStyle = "#2f6fed";
+      c.stroke();
+      c.restore();
+    });
+  }
+
+  _finishLasso(a, cancel) {
+    this._clearLive();
+    if (cancel) return;
+    if (a.len < 6) {
+      // A tap: that one markup.
+      const d = this._pickShape(a.page, a.pts[0]);
+      if (d && this._kindOf(d) !== "retext") this.selectGroup(a.page, [d]);
+      return;
+    }
+    const items = this._lassoItems(a.page, a.pts);
+    if (items.length) this.selectGroup(a.page, items);
+    else this.cb.onInfo?.("No markups there: draw round them, or over them");
+  }
+
+  // Points spread over a markup, to see how much of it a lasso holds.
+  _samplePts(d) {
+    const kind = this._kindOf(d);
+    if (kind === "ink") {
+      const all = d.ink.flat(), step = Math.max(1, Math.floor(all.length / 60));
+      return all.filter((_, k) => k % step === 0);
+    }
+    if (kind === "highlight") return d.quads.flatMap((q) => { const c = quadPoly(q); return [...c, [(q[0] + q[6]) / 2, (q[1] + q[7]) / 2]]; });
+    const out = [];
+    if (d.pts) { out.push(...d.pts); for (let k = 1; k < d.pts.length; k++) out.push([(d.pts[k - 1][0] + d.pts[k][0]) / 2, (d.pts[k - 1][1] + d.pts[k][1]) / 2]); }
+    if (d.rect) { const [x0, y0, x1, y1] = d.rect; out.push([x0, y0], [x1, y0], [x0, y1], [x1, y1], [(x0 + x1) / 2, (y0 + y1) / 2]); }
+    if (d.callout) out.push(d.callout[0]);
+    return out;
+  }
+
+  // Markups the lasso holds (at least half inside the loop) or was drawn over.
+  _lassoItems(i, pts) {
+    let area = 0;
+    for (let k = 0, j = pts.length - 1; k < pts.length; j = k++) area += (pts[j][0] + pts[k][0]) * (pts[j][1] - pts[k][1]);
+    const loop = pts.length > 2 && Math.abs(area / 2) * this.scale * this.scale > 300;
+    const tol = 6 / this.scale;
+    return (this.doc.annots.get(i) || []).filter((d) => {
+      if (this._erased.has(d) || this._kindOf(d) === "retext") return false;
+      if (loop) {
+        const sp = this._samplePts(d);
+        if (sp.length && sp.filter((p) => inPoly(p, pts)).length >= sp.length / 2) return true;
+      }
+      for (const p of pts) if (this._hitAnnot(d, p, tol)) return true;
+      return false;
+    });
+  }
+
+  get groupCount() { return this.groupSel ? this.groupSel.items.length : 0; }
+
+  // Select these markups (all on page i) together.
+  selectGroup(i, items) {
+    this.clearGroup();
+    this.deselectShape();
+    if (!items.length) return;
+    for (const d of items) {
+      if (isPic(this._kindOf(d)) && !d.png) this.engine.annotImage(i, () => d.id).then((png) => { if (png && !d.png) d.png = png; }).catch(() => {});
+    }
+    this.groupSel = { page: i, items: items.slice(), el: null };
+    this._renderGroup();
+    this.cb.onShapeSelect?.("group", null);
+  }
+
+  clearGroup() {
+    const G = this.groupSel;
+    if (!G) return;
+    this.groupSel = null;
+    G.el?.remove();
+    for (const d of G.items) this._nodes.get(d)?.removeAttribute("transform");
+    this.cb.onShapeSelect?.(null, null);
+  }
+
+  // Select every markup on page i (the page in view by default).
+  selectAllMarks(i = this.currentPage()) {
+    const items = (this.doc?.annots.get(i) || []).filter((d) => !this._erased.has(d) && this._kindOf(d) !== "retext");
+    if (items.length) this.selectGroup(i, items);
+    return items.length;
+  }
+
+  _groupBox(items = this.groupSel.items) {
+    let b = null;
+    for (const d of items) {
+      const r = this._selBox(this._snap(d), this._kindOf(d), d);
+      if (!r) continue;
+      b = b ? [Math.min(b[0], r[0]), Math.min(b[1], r[1]), Math.max(b[2], r[2]), Math.max(b[3], r[3])] : r.slice();
+    }
+    return b;
+  }
+
+  _renderGroup(box) {
+    const G = this.groupSel;
+    if (!G || !this.doc) return;
+    const i = G.page, P = this.doc.pages[i], s = this._state(i);
+    const pct = (node, x, y) => { node.style.left = ((x - P.x0) / P.w) * 100 + "%"; node.style.top = ((y - P.y0) / P.h) * 100 + "%"; };
+    if (!G.el || G.el.parentNode !== s.el) {
+      G.el?.remove();
+      G.el = el("div", "shape-sel group-sel", s.el);
+      el("div", "ss-frame", G.el).dataset.role = "move";
+      for (const r of ["nw", "ne", "sw", "se"]) { const h = el("div", "ss-h " + r, G.el); h.dataset.role = r; }
+      const bar = el("div", "ss-bar", G.el);
+      bar.innerHTML = `<span class="gs-n"></span><button class="btn" data-act="copy">Copy</button><button class="btn" data-act="duplicate">Duplicate</button><button class="btn" data-act="delete">Delete</button>`;
+      bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+      bar.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-act]");
+        if (!b) return;
+        if (b.dataset.act === "delete") this.deleteGroup();
+        else this.cb.onGroupAction?.(b.dataset.act);
+      });
+      G.el.addEventListener("pointerdown", (e) => this._groupDown(e));
+      this.cb.onDecorate?.(bar);
+    }
+    G.el.querySelector(".gs-n").textContent = G.items.length === 1 ? "1 markup" : `${G.items.length} markups`;
+    const [x0, y0, x1, y1] = box || this._groupBox() || [P.x0, P.y0, P.x0, P.y0];
+    const frame = G.el.querySelector(".ss-frame");
+    pct(frame, x0, y0);
+    frame.style.width = ((x1 - x0) / P.w) * 100 + "%";
+    frame.style.height = ((y1 - y0) / P.h) * 100 + "%";
+    for (const h of G.el.querySelectorAll(".ss-h")) { const r = h.dataset.role; pct(h, r.includes("w") ? x0 : x1, r.includes("n") ? y0 : y1); }
+    const bar = G.el.querySelector(".ss-bar");
+    const below = (y0 - P.y0) * this.scale < 56;
+    bar.classList.toggle("below", below);
+    pct(bar, x0, below ? y1 : y0);
+  }
+
+  // Drag the group (move) or a corner (resize, keeping proportions). The
+  // markups are previewed with a transform and changed once, on release.
+  _groupDown(e) {
+    const G = this.groupSel;
+    const t = e.target.closest("[data-role]");
+    if (!G || !t) return;
+    e.stopPropagation();
+    e.preventDefault();
+    if (e.pointerType === "touch" && now() - penSeen.last < PALM_MS) return;
+    if (e.pointerType === "pen") penSeen.last = now();
+    try { t.setPointerCapture(e.pointerId); } catch {}
+    this.rect = this.root.getBoundingClientRect();
+    const role = t.dataset.role, i = G.page, P = this.doc.pages[i];
+    const b0 = this._groupBox(), sx = e.clientX, sy = e.clientY;
+    const w0 = Math.max(1e-3, b0[2] - b0[0]), h0 = Math.max(1e-3, b0[3] - b0[1]);
+    // The corner that stays put while resizing.
+    const ax = role.includes("w") ? b0[2] : b0[0], ay = role.includes("n") ? b0[3] : b0[1];
+    let moved = false, cur = { s: 1, tx: 0, ty: 0 };
+    const move = (ev) => {
+      if (ev.pointerId !== e.pointerId || this.groupSel !== G) return;
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      moved = true;
+      const dx = (ev.clientX - sx) / this.scale, dy = (ev.clientY - sy) / this.scale;
+      if (role === "move") {
+        cur = { s: 1, tx: clamp(dx, P.x0 - b0[0], P.x1 - b0[2]), ty: clamp(dy, P.y0 - b0[1], P.y1 - b0[3]) };
+      } else {
+        const px = (role.includes("w") ? b0[0] : b0[2]) + dx, py = (role.includes("n") ? b0[1] : b0[3]) + dy;
+        let sc = Math.max(Math.abs(px - ax) / w0, Math.abs(py - ay) / h0);
+        // At least 16 px on screen; no bigger than the page.
+        const maxW = role.includes("w") ? ax - P.x0 : P.x1 - ax, maxH = role.includes("n") ? ay - P.y0 : P.y1 - ay;
+        sc = clamp(sc, Math.max(16 / this.scale / w0, 16 / this.scale / h0, 0.05), Math.max(0.05, Math.min(maxW / w0, maxH / h0, 20)));
+        cur = { s: sc, tx: ax * (1 - sc), ty: ay * (1 - sc) };
+      }
+      const m = `matrix(${cur.s} 0 0 ${cur.s} ${cur.tx} ${cur.ty})`;
+      for (const d of G.items) this._nodes.get(d)?.setAttribute("transform", m);
+      const f = (x, y) => [x * cur.s + cur.tx, y * cur.s + cur.ty];
+      this._renderGroup([...f(b0[0], b0[1]), ...f(b0[2], b0[3])]);
+    };
+    const up = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      t.removeEventListener("pointermove", move);
+      t.removeEventListener("pointerup", up);
+      t.removeEventListener("pointercancel", up);
+      if (this.groupSel !== G) return;
+      for (const d of G.items) this._nodes.get(d)?.removeAttribute("transform");
+      if (!moved || ev.type === "pointercancel") { this._renderGroup(); return; }
+      const { s, tx, ty } = cur;
+      this._transformGroup((p) => [p[0] * s + tx, p[1] * s + ty], s);
+    };
+    t.addEventListener("pointermove", move);
+    t.addEventListener("pointerup", up);
+    t.addEventListener("pointercancel", up);
+  }
+
+  // Move/scale every selected markup by f (one undo step).
+  _transformGroup(f, s) {
+    const G = this.groupSel, i = G.page, ops = [];
+    for (const d of G.items) {
+      const kind = this._kindOf(d), before = this._snap(d);
+      const after = xformGeo(this._snap(d), f, s, kind);
+      if (kind === "measure" && s !== 1 && d.scale) after.contents = measureText(d.type, after.pts, d.scale, d.dp).contents;
+      if (JSON.stringify(before) !== JSON.stringify(after)) ops.push({ op: "upd", page: i, data: d, before, after });
+    }
+    if (!ops.length) { this._renderGroup(); return; }
+    for (const o of ops) this._applySnap(i, o.data, o.after);
+    this._pushHistory(ops);
+    this._renderGroup();
+  }
+
+  // Move the selected markups by (dx, dy) points (arrow keys).
+  nudgeGroup(dx, dy) {
+    const G = this.groupSel;
+    if (!G) return false;
+    const P = this.doc.pages[G.page], b = this._groupBox();
+    dx = clamp(dx, P.x0 - b[0], P.x1 - b[2]);
+    dy = clamp(dy, P.y0 - b[1], P.y1 - b[3]);
+    this._transformGroup((p) => [p[0] + dx, p[1] + dy], 1);
+    return true;
+  }
+
+  deleteGroup() {
+    const G = this.groupSel;
+    if (!G) return 0;
+    this.clearGroup();
+    const ops = G.items.map((d) => ({ op: "del", page: G.page, data: d }));
+    for (const o of ops) this._removeAnnot(o.page, o.data);
+    this._pushHistory(ops);
+    return ops.length;
+  }
+
+  // The selected markups (several, or the one selected) as plain data, to
+  // paste on another page or into another PDF: { items, box }.
+  async copyMarks() {
+    const G = this.groupSel, S = this.shapeSel;
+    const items = G ? G.items : S && this._kindOf(S.d) !== "retext" ? [S.d] : [];
+    const page = G ? G.page : S?.page;
+    if (!items.length) return null;
+    for (const d of items) {
+      if (isPic(this._kindOf(d)) && !d.png) { try { d.png = await this.engine.annotImage(page, () => d.id); } catch {} }
+    }
+    const list = items.filter((d) => !isPic(this._kindOf(d)) || d.png).map((d) => {
+      const o = structuredClone(this._payload(d));
+      if (d.measure) o.measure = true;
+      return o;
+    });
+    return list.length ? { items: list, box: this._groupBox(items) } : null;
+  }
+
+  // Paste copied markups on page i, centred at `at` (or where they were,
+  // moved by `offset`), kept on the page; they come in selected.
+  pasteMarks(clip, i, at = null, offset = 0) {
+    if (!this.doc || !clip || !clip.items.length) return 0;
+    const P = this.doc.pages[i], [bx0, by0, bx1, by1] = clip.box, w = bx1 - bx0, h = by1 - by0;
+    const cx = at ? at[0] : (bx0 + bx1) / 2 + offset, cy = at ? at[1] : (by0 + by1) / 2 + offset;
+    const nx = clamp(cx - w / 2, P.x0, Math.max(P.x0, P.x1 - w)), ny = clamp(cy - h / 2, P.y0, Math.max(P.y0, P.y1 - h));
+    const dx = nx - bx0, dy = ny - by0, f = (p) => [p[0] + dx, p[1] + dy];
+    const items = clip.items.map((o) => xformGeo(structuredClone(o), f, 1, this._kindOf(o)));
+    const ops = items.map((d) => ({ op: "add", page: i, data: d }));
+    for (const o of ops) this._insertAnnot(i, o.data);
+    this._pushHistory(ops);
+    this.selectGroup(i, items);
+    return items.length;
   }
 
   // Finish typing (e.g. before saving).
@@ -3100,6 +3490,7 @@ export class Viewer {
   }
 
   _insertAnnot(i, d) {
+    this.cb.onMarks?.(i);
     const doc = this.doc;
     if (!doc.annots.has(i)) doc.annots.set(i, []);
     doc.annots.get(i).push(d);
@@ -3113,6 +3504,7 @@ export class Viewer {
   }
 
   _removeAnnot(i, d) {
+    this.cb.onMarks?.(i);
     if (this.shapeSel && this.shapeSel.d === d) this.deselectShape();
     const list = this.doc.annots.get(i);
     const k = list ? list.indexOf(d) : -1;
@@ -3163,6 +3555,7 @@ export class Viewer {
     if (this.editor) { this._closeEditor(false); return; }
     if (this.placing) { this.finishPlacing(false); return; }
     this.deselectShape();
+    this.clearGroup();
     if (!d || this.action || !d.undo.length) return;
     const h = d.undo.pop();
     this._apply(h.ops, true);
@@ -3173,6 +3566,7 @@ export class Viewer {
   redo() {
     const d = this.doc;
     this.deselectShape();
+    this.clearGroup();
     if (!d || this.action || !d.redo.length) return;
     const h = d.redo.pop();
     this._apply(h.ops, false);

@@ -12,38 +12,46 @@
 <div id="app">
   <header id="toolbar">
     <div class="tb-group tb-left">
-      <button class="btn icon-btn" id="btn-sidebar" title="Show/hide files (Ctrl+B)"></button>
-      <div id="title"><span id="title-text">Eagles PDF viewer</span><span id="dirty-dot" title="Unsaved changes"></span></div>
+      <button class="btn icon-btn" id="btn-sidebar" data-rb="sidebar" title="Show/hide files (Ctrl+B)"></button>
+      <img id="app-logo" src="logo.png" alt="Eagles PDF viewer" width="26" height="26" draggable="false">
+      <div id="title" data-rb="title"><span id="title-text">Eagles PDF viewer</span><span id="dirty-dot" title="Unsaved changes"></span></div>
     </div>
     <div class="tb-group tb-tools" role="toolbar" aria-label="Tools">
       <div class="seg" id="tools">
-        <button class="btn icon-btn tool" data-tool="select" title="Select (V): tap or drag a markup to select, move or delete it; drag over text to select and copy; drag on blank paper to pan"></button>
-        <button class="btn icon-btn tool" data-tool="hand" title="Pan (H)"></button>
-        <button class="btn icon-btn tool" data-tool="highlight" title="Highlight (M)"></button>
-        <button class="btn icon-btn tool" data-tool="pen" title="Pen (P)"></button>
-        <button class="btn icon-btn tool has-menu" data-tool="box" title="Shapes (B): box, line, arrow, cloud, callout, text. Tap again to choose."></button>
-        <button class="btn icon-btn tool" data-tool="sign" title="Signature (S): add your signature, then drag it into place"></button>
-        <button class="btn icon-btn tool" data-tool="eraser" title="Eraser (E)"></button>
-        <button class="btn icon-btn tool" data-tool="snip" title="Snip (C): drag a box, or draw around something, to copy it as a picture; then tap where it should go (or Ctrl+V)"></button>
-        <button class="btn icon-btn tool" data-tool="content" title="Edit content (X): drag a box to erase an area of the page; tap a line of text to retype it in the same font"></button>
-        <button class="btn icon-btn tool" data-tool="measure" title="Measure distance, path length and area (R)"></button>
+        <button class="btn icon-btn tool" data-tool="select" data-rb="tool.select" title="Select (V): tap or drag a markup to select, move or delete it; drag over text to select and copy; drag on blank paper to pan"></button>
+        <button class="btn icon-btn tool" data-tool="hand" data-rb="tool.hand" title="Pan (H)"></button>
+        <button class="btn icon-btn tool" data-tool="highlight" data-rb="tool.highlight" title="Highlight (M)"></button>
+        <button class="btn icon-btn tool" data-tool="pen" data-rb="tool.pen" title="Pen (P)"></button>
+        <button class="btn icon-btn tool has-menu" data-tool="box" data-rb="tool.box" title="Shapes (B): box, line, arrow, cloud, callout, text. Tap again to choose."></button>
+        <button class="btn icon-btn tool" data-tool="sign" data-rb="tool.sign" title="Signature (S): add your signature, then drag it into place"></button>
+        <button class="btn icon-btn tool" data-tool="eraser" data-rb="tool.eraser" title="Eraser (E)"></button>
+        <button class="btn icon-btn tool" data-tool="lasso" data-rb="tool.lasso" title="Lasso select: draw round markups (or over them) to select them, then move, resize, copy or delete them. The pen's side button does it with any tool."></button>
+        <button class="btn icon-btn tool" data-tool="snip" data-rb="tool.snip" title="Snip (C): drag a box, or draw around something, to copy it as a picture; then tap where it should go (or Ctrl+V)"></button>
+        <button class="btn icon-btn tool" data-tool="content" data-rb="tool.content" title="Edit content (X): drag a box to erase an area of the page; tap a line of text to retype it in the same font"></button>
+        <button class="btn icon-btn tool" data-tool="measure" data-rb="tool.measure" title="Measure distance, path length and area (R)"></button>
       </div>
-      <button class="btn icon-btn" id="btn-style" title="Color and size"><span class="swatch-dot"></span></button>
-      <button class="btn icon-btn" id="btn-touch" title="Finger draws (T). Off: finger pans and zooms, pen draws."></button>
-      <span class="tb-sep"></span>
-      <button class="btn icon-btn" id="btn-undo" title="Undo (Ctrl+Z)"></button>
-      <button class="btn icon-btn" id="btn-redo" title="Redo (Ctrl+Y)"></button>
+      <button class="btn icon-btn" id="btn-style" data-rb="style" title="Color and size"><span class="swatch-dot"></span></button>
+      <button class="btn icon-btn" id="btn-touch" data-rb="touch" title="Finger draws (T). Off: finger pans and zooms, pen draws."></button>
+      <span class="tb-sep" data-rb-sep></span>
+      <button class="btn icon-btn" id="btn-undo" data-rb="undo" title="Undo (Ctrl+Z)"></button>
+      <button class="btn icon-btn" id="btn-redo" data-rb="redo" title="Redo (Ctrl+Y)"></button>
+      <button class="btn icon-btn" id="btn-paste" data-rb="paste" title="Paste (Ctrl+V)"></button>
     </div>
     <div class="tb-group tb-right">
+      <button class="btn icon-btn" id="btn-search" data-rb="search" title="Search in this PDF (Ctrl+F)"></button>
       <div class="zoom">
-        <button class="btn icon-btn" id="btn-zoomout" title="Zoom out (Ctrl+-)"></button>
-        <button class="btn" id="zoom-label" title="Zoom options">100%</button>
-        <button class="btn icon-btn" id="btn-zoomin" title="Zoom in (Ctrl+=)"></button>
-        <button class="btn icon-btn hide-narrow" id="btn-fitw" title="Fit width (Ctrl+0)"></button>
-        <button class="btn icon-btn hide-narrow" id="btn-fitp" title="Fit page (Ctrl+9)"></button>
+        <button class="btn icon-btn" id="btn-zoomout" data-rb="zoomout" title="Zoom out (Ctrl+-)"></button>
+        <button class="btn" id="zoom-label" data-rb="zoom" title="Zoom options">100%</button>
+        <button class="btn icon-btn" id="btn-zoomin" data-rb="zoomin" title="Zoom in (Ctrl+=)"></button>
+        <button class="btn icon-btn" id="btn-fitw" data-rb="fitw" title="Fit width (Ctrl+0)"></button>
+        <button class="btn icon-btn" id="btn-fitp" data-rb="fitp" title="Fit page (Ctrl+9)"></button>
       </div>
-      <button class="btn icon-btn" id="btn-pages" title="Pages: delete, add, move and rotate pages"></button>
-      <button class="btn icon-btn" id="btn-save" title="Save (Ctrl+S)"></button>
+      <button class="btn icon-btn" id="btn-side" data-rb="side" title="Open a PDF side by side (Ctrl+Shift+O)"></button>
+      <button class="btn icon-btn" id="btn-full" data-rb="fullscreen" title="Full screen (F11)"></button>
+      <button class="btn icon-btn" id="btn-pages" data-rb="pages" title="Pages: delete, add, move and rotate pages"></button>
+      <button class="btn icon-btn" id="btn-marks" data-rb="marks" title="Markups: a list of every markup in this PDF"></button>
+      <button class="btn icon-btn" id="btn-autosave" data-rb="autosave" title="Autosave"></button>
+      <button class="btn icon-btn" id="btn-save" data-rb="save" title="Save (Ctrl+S)"></button>
       <button class="btn icon-btn" id="btn-more" title="More"></button>
     </div>
   </header>
@@ -76,9 +84,27 @@
         <button class="btn primary" id="mb-done" title="Finish (Enter or double-click)" hidden></button>
         <button class="btn icon-btn" id="mb-cancel" title="Cancel (Esc)"></button>
       </div>
+      <div id="findbar" hidden>
+        <input id="find-q" type="search" placeholder="Search in this PDF" autocomplete="off" spellcheck="false" aria-label="Search in this PDF">
+        <span id="find-n"></span>
+        <button class="btn icon-btn" id="find-prev" title="Previous (Shift+Enter)"></button>
+        <button class="btn icon-btn" id="find-next" title="Next (Enter)"></button>
+        <button class="btn icon-btn" id="find-list" title="All results in a list"></button>
+        <button class="btn icon-btn" id="find-close" title="Close (Esc)"></button>
+      </div>
       <div id="toasts"></div>
     </section>
-    <aside id="pages" hidden></aside>
+    <aside id="rpanel" hidden>
+      <div class="rp-tabs" role="tablist">
+        <button class="rp-tab" data-tab="pages" role="tab">Pages</button>
+        <button class="rp-tab" data-tab="marks" role="tab">Markups</button>
+        <button class="rp-tab" data-tab="find" role="tab">Search</button>
+        <button class="btn icon-btn rp-close" title="Hide this panel"></button>
+      </div>
+      <div id="pages" class="rp-body"></div>
+      <div id="marks" class="rp-body" hidden></div>
+      <div id="findlist" class="rp-body" hidden></div>
+    </aside>
   </div>
 </div>
 <div id="popover" hidden></div>

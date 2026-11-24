@@ -3,6 +3,7 @@ import { Engine } from "./engine.js";
 import { Viewer, cssColor, penActive } from "./viewer.js";
 import { Sidebar } from "./sidebar.js";
 import { PagesPanel, moveOrder } from "./pages.js";
+import { MarkupsPanel } from "./markups.js";
 import { icon } from "./icons.js";
 import { Keymap, comboFromEvent, formatCombo } from "./shortcuts.js";
 import { loadSignatureImage, analyzeSignature, removeBackground, signaturePng, fromDataUrl, imageMime, IMAGE_EXT } from "./sigproc.js";
@@ -25,7 +26,10 @@ const cfg = Object.assign(
     measure: null,
     scales: {},           // path -> { all: scale, pages: { index: scale } }
     sidebarOpen: true,
-    pagesOpen: false,     // the Pages panel on the right
+    pagesOpen: false,     // the panel on the right (Pages, Markups, Search)
+    panelTab: "pages",
+    autosave: false,      // save by itself a few seconds after changes
+    ribbon: {},           // toolbar buttons shown or hidden (id -> bool)
     blankSize: "A4",      // last size chosen for a blank page
     pageLabels: "both",   // pages show their number, name or both
     sidebarW: 300,
@@ -51,7 +55,7 @@ const PALETTES = {
 };
 const hexToRgb = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16) / 255);
 cfg.styles = Object.assign(
-  { pen: { color: "#1d4ed8", width: 1.5 }, highlight: { color: "#ffe11a", width: 12 }, box: { color: "#dc2626", width: 2 } },
+  { pen: { color: "#1d4ed8", width: 1.5 }, highlight: { color: "#ffe11a", width: 12, mode: "words" }, box: { color: "#dc2626", width: 2 } },
   cfg.styles || {}
 );
 cfg.textStyle = Object.assign({ size: 12, fillText: false, fillCallout: true }, cfg.textStyle || {});
@@ -159,6 +163,7 @@ function paneCallbacks(P) {
     },
     onHistory(canUndo, canRedo, dirty) {
       P.el.classList.toggle("dirty", dirty);
+      if (dirty) scheduleAutosave(P);
       if (!on()) return;
       updateUndoButtons();
       appEl.classList.toggle("dirty", dirty);
@@ -169,7 +174,15 @@ function paneCallbacks(P) {
     // A finger held on the page (or a right-click): the page menu.
     onHold: (h) => { activate(P); pageHoldMenu(P, h); },
     // Snip tool: a tap puts the copied picture there.
-    onSnipTap: (page, p) => { activate(P); paste({ at: { page, p } }); },
+    onSnipTap: (page, p) => { activate(P); paste({ at: { page, p }, picture: true }); },
+    // Markups on page i changed (for the markups list).
+    onMarks: (i) => {
+      (P.markPages ||= new Set()).add(i);
+      clearTimeout(P.markTimer);
+      P.markTimer = setTimeout(() => { const s = P.markPages; P.markPages = null; markupsPanel.invalidate(P.id, s); }, 250);
+    },
+    // The bar over markups selected with the lasso.
+    onGroupAction: (act) => { activate(P); if (act === "copy") copyMarks(); else if (act === "duplicate") duplicateMarks(); },
   };
 }
 
@@ -195,8 +208,10 @@ function activate(P) {
 // The toolbar, title, page counter and Pages panel show the active PDF.
 function syncActive() {
   const P = active;
-  P.el.append(pagePill, mbar);
+  P.el.append(pagePill, mbar, findbar);
   pagesPanel.switchTo(engine, P.id, viewer.doc ? viewer.doc.pages : [], viewer.doc ? viewer.currentPage() : 0);
+  if (viewer.doc) markupsPanel.setDocument(P.id, viewer.pageCount); else markupsPanel.clear();
+  findSync();
   updateUndoButtons();
   appEl.classList.toggle("dirty", !!viewer.dirty);
   updateTitle();
@@ -363,8 +378,10 @@ function removePane(P) {
   P.engine.destroy();
   P.el.remove();
   P.split?.remove();
+  clearTimeout(P.autoTimer);
   if (active === P) { active = null; activate(panes[Math.min(k, panes.length - 1)]); }
   pagesPanel.forget(P.id);
+  markupsPanel.forget(P.id);
   layoutPanes();
   saveSession();
 }
@@ -375,7 +392,9 @@ function closeDocument(P) {
   P.engine.close();
   P.state.path = null;
   P.docHist.undo = []; P.docHist.redo = [];
+  P.find = null;
   updatePaneHead(P);
+  markupsPanel.forget(P.id);
   if (P !== active) return;
   pagesPanel.clear();
   $("#empty-msg").textContent = cfg.folder ? "Pick a PDF from the list on the left." : "Open a folder to see every PDF inside it, including subfolders.";
@@ -455,6 +474,12 @@ const pagesPanel = new PagesPanel($("#pages"), engine, {
   },
   onDropOut: (list, out) => copyPagesTo(active, list, out.pane),
 });
+
+const markupsPanel = new MarkupsPanel($("#marks"), {
+  load: (key, from, to) => { const P = panes.find((Q) => Q.id === key); return P && P.viewer.doc ? P.engine.markList(from, to) : Promise.resolve([]); },
+  onPick: (it) => { viewer.revealMark(it.page, it.id); },
+  pageLabel: (i) => { const name = viewer.doc?.pages[i]?.name; return name ? `Page ${i + 1} · ${name}` : `Page ${i + 1}`; },
+});
 const sidebar = new Sidebar($("#sidebar"), {
   onOpen: (p) => openFile(p),
   onPickFolder: () => pickFolder(),
@@ -477,14 +502,27 @@ setIcon("#btn-fitp", "fitPage");
 setIcon("#btn-save", "save");
 setIcon("#btn-more", "more");
 setIcon("#btn-touch", "touch");
+setIcon("#btn-paste", "clipboard");
+setIcon("#btn-search", "search");
+setIcon("#btn-side", "columns");
+setIcon("#btn-full", "maximize");
+setIcon("#btn-marks", "stickyNote");
+setIcon("#btn-autosave", "autosave");
+setIcon("#find-prev", "up");
+setIcon("#find-next", "down");
+setIcon("#find-list", "list");
+setIcon("#find-close", "x");
+document.querySelector("#rpanel .rp-close").innerHTML = icon("x");
 $("#empty-open").innerHTML = icon("folderOpen") + " Open folder";
-const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", pen: "pen", box: "square", eraser: "eraser", measure: "ruler", sign: "signature", content: "replaceText", snip: "scissors" };
+const TOOL_ICONS = { select: "select", hand: "hand", highlight: "highlighter", pen: "pen", box: "square", eraser: "eraser", measure: "ruler", sign: "signature", content: "replaceText", snip: "scissors", lasso: "lasso" };
+const LASSO_HINT = "Draw round markups, or over them, to select them · then drag to move, corners to resize";
 const SNIP_HINT = "Drag a box, or draw around something, to copy it as a picture · then tap where it should go";
 function updateToolIcons() {
   for (const b of document.querySelectorAll(".tool")) {
     const t = b.dataset.tool;
     const ic = t === "box" ? SHAPES.find(([k]) => k === cfg.shape)[1] : TOOL_ICONS[t];
-    b.innerHTML = icon(ic) + (t === "box" ? `<span class="caret" data-caret="1">${icon("caret")}</span>` : "");
+    b.innerHTML = icon(ic) + (t === "box" ? `<span class="caret" data-caret="1">${icon("caret")}</span>` : "") +
+      (t === "highlight" && cfg.styles.highlight.mode === "draw" ? `<span class="hl-badge" title="Draws freely">~</span>` : "");
   }
 }
 updateToolIcons();
@@ -522,6 +560,7 @@ function applyStyles() {
 function applyStylesTo(v) {
   for (const k of ["pen", "highlight", "box"]) v.setStyle(k, { color: hexToRgb(cfg.styles[k].color), width: cfg.styles[k].width });
   v.setStyle("pen", { pressure: cfg.styles.pen.pressure !== false });
+  v.setStyle("highlight", { mode: cfg.styles.highlight.mode === "draw" ? "draw" : "words" });
   v.setMeasureStyle({ color: hexToRgb(cfg.measure.color), dp: cfg.measure.dp });
   v.measureMode = cfg.measure.mode;
   v.setShape(cfg.shape);
@@ -586,6 +625,7 @@ $("#tools").addEventListener("click", (e) => {
   if (t === "box" && e.target.closest("[data-caret]")) { if (cfg.tool !== "box") setTool("box"); openStylePopover(); return; }
   if (t === "content") { setTool("content"); toast(CONTENT_HINT); return; }
   if (t === "snip") { setTool("snip"); toast(SNIP_HINT); return; }
+  if (t === "lasso") { setTool("lasso"); toast(LASSO_HINT); return; }
   if (t === cfg.tool && cfg.tool === "measure") openMeasurePopover();
   else if (t === cfg.tool && cfg.styles[cfg.tool]) openStylePopover();
   else setTool(t);
@@ -596,6 +636,12 @@ $("#btn-sidebar").onclick = () => toggleSidebar();
 $("#btn-undo").onclick = () => undo();
 $("#btn-redo").onclick = () => redo();
 $("#btn-pages").onclick = () => togglePages();
+$("#btn-marks").onclick = () => toggleMarks();
+$("#btn-paste").onclick = () => paste({ center: true });
+$("#btn-search").onclick = () => openFind();
+$("#btn-side").onclick = () => openBeside(null);
+$("#btn-full").onclick = () => host.toggleFullscreen();
+$("#btn-autosave").onclick = () => setAutosave(!cfg.autosave);
 $("#btn-zoomin").onclick = () => viewer.zoomBy(1.25);
 $("#btn-zoomout").onclick = () => viewer.zoomBy(0.8);
 $("#btn-fitw").onclick = () => viewer.fit("width");
@@ -618,11 +664,14 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   { label: "Open file…", icon: "openFile", key: keyOf("file.openFile"), run: pickFile },
   "-",
   { label: "Save", icon: "save", key: keyOf("file.save"), run: () => save(), disabled: !state.path },
+  { label: "Autosave", icon: cfg.autosave ? "check" : "autosave", key: keyOf("file.autosave"), run: () => setAutosave(!cfg.autosave) },
   { label: "Save as…", key: keyOf("file.saveAs"), run: () => save({ as: true }), disabled: !state.path },
   { label: "Show in folder", icon: "external", run: () => host.showInFolder(state.path), disabled: !state.path },
   { label: "Embed markups…", icon: "layers", key: keyOf("file.embed"), run: () => embedMarkups(), disabled: !state.path },
   "-",
-  { label: cfg.pagesOpen ? "Hide pages" : "Pages: delete, add, move, rotate", icon: "pages", key: keyOf("pages.panel"), run: () => togglePages() },
+  { label: "Search in this PDF…", icon: "search", key: keyOf("find.open"), run: () => openFind(), disabled: !state.path },
+  { label: "Markups: list every markup", icon: "stickyNote", key: keyOf("panel.marks"), run: () => toggleMarks(true) },
+  { label: cfg.pagesOpen && cfg.panelTab === "pages" ? "Hide pages" : "Pages: delete, add, move, rotate", icon: "pages", key: keyOf("pages.panel"), run: () => togglePages() },
   { label: "Add a blank page…", icon: "filePlus", key: keyOf("pages.blank"), run: () => blankPageDialog(), disabled: !state.path },
   { label: "Insert pages from another PDF…", icon: "openFile", key: keyOf("pages.insert"), run: () => insertPagesDialog(null), disabled: !state.path },
   { label: "Merge all PDFs in the folder…", icon: "merge", key: keyOf("file.mergeFolder"), run: () => mergeFolder(), disabled: !cfg.folder },
@@ -631,12 +680,14 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   (panes.length > 1 || state.path) && { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(active) },
   "-",
   { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
-  { label: "Paste picture", icon: "clipboard", key: keyOf("edit.paste"), run: () => paste({ center: true }), disabled: !state.path },
+  { label: "Paste", icon: "clipboard", key: keyOf("edit.paste"), run: () => paste({ center: true }), disabled: !state.path },
+  { label: "Select all markups on this page", icon: "lasso", key: keyOf("edit.selectMarks"), run: () => selectAllMarks(), disabled: !state.path },
   { label: "Drawing scale…", icon: "ruler", run: () => scaleDialog(), disabled: !state.path },
   "-",
   ...wheelItems(),
   "-",
-  { label: "Full screen", key: keyOf("view.fullscreen"), run: () => host.toggleFullscreen() },
+  { label: "Full screen", icon: "maximize", key: keyOf("view.fullscreen"), run: () => host.toggleFullscreen() },
+  { label: "Customize the toolbar…", icon: "sliders", key: keyOf("view.ribbon"), run: () => ribbonDialog() },
   { label: "Keyboard shortcuts…", icon: "keyboard", key: keyOf("help.keys"), run: () => shortcutsDialog() },
   { label: "Keyboard, touch and pen help", icon: "info", key: keyOf("help.help"), run: showHelp },
 ]);
@@ -694,6 +745,12 @@ function openStylePopover() {
   const maxW = pal.widths[pal.widths.length - 1];
   const isText = shape === "text" || shape === "callout";
   let html = "";
+  if (tool === "highlight" && !selecting) {
+    const m = cfg.styles.highlight.mode === "draw" ? "draw" : "words";
+    html += `<div class="pop-title">Highlight</div><div class="mmodes hlmodes">` +
+      `<button class="btn${m === "words" ? " sel" : ""}" data-hlmode="words" title="Snaps to the words you sweep over">${icon("text")}<span>Words</span></button>` +
+      `<button class="btn${m === "draw" ? " sel" : ""}" data-hlmode="draw" title="A freehand marker, wherever you draw">${icon("highlighter")}<span>Draw</span></button></div>`;
+  }
   if (tool === "box" && !selecting) {
     html += `<div class="pop-title">Shape</div><div class="shapes">${SHAPES.map(([k, ic, l]) => `<button class="btn${k === shape ? " sel" : ""}" data-shape="${k}" title="${l}">${icon(ic)}<span>${l}</span></button>`).join("")}</div>`;
   }
@@ -718,12 +775,14 @@ function openStylePopover() {
   pop.innerHTML = html;
   pop.onclick = (e) => {
     const sh = e.target.closest("[data-shape]");
+    const hm = e.target.closest("[data-hlmode]");
     const sw = e.target.closest(".swatch");
     const ts = e.target.closest("[data-ts]");
     const sz = e.target.closest("[data-w]");
     // With a shape selected, colour/size changes also apply to it.
     const sel = selecting && viewer.selectedShape;
     if (sh) { cfg.shape = sh.dataset.shape; updateToolIcons(); }
+    else if (hm) setHighlightMode(hm.dataset.hlmode, false);
     else if (sw) { st.color = sw.dataset.c; if (sel) viewer.restyleSelected({ color: hexToRgb(st.color) }); }
     else if (ts) { cfg.textStyle.size = +ts.dataset.ts; if (sel) viewer.restyleSelected({ size: cfg.textStyle.size }); }
     else if (sz) { st.width = +sz.dataset.w; if (sel) viewer.restyleSelected({ width: st.width }); }
@@ -747,6 +806,16 @@ function openStylePopover() {
 }
 
 const toolButton = (t) => document.querySelector(`.tool[data-tool="${t}"]`);
+
+// Highlighter: "words" snaps to the text you sweep over; "draw" is a freehand
+// marker wherever you draw.
+function setHighlightMode(mode, announce = true) {
+  cfg.styles.highlight.mode = mode === "draw" ? "draw" : "words";
+  applyStyles();
+  updateToolIcons();
+  saveCfg();
+  if (announce) { setTool("highlight"); toast(mode === "draw" ? "Highlighter draws freely" : "Highlighter highlights words"); }
+}
 
 document.addEventListener("pointerdown", (e) => {
   if (!pop.hidden && !pop.contains(e.target) && !(popAnchor instanceof Element && popAnchor.contains(e.target))) closePopover();
@@ -812,7 +881,7 @@ async function showHelp() {
   closePopover();
   const gestures = [
     ["Finger drag", "Pan (flick to glide)"], ["Two-finger pinch", "Zoom around your fingers"], ["Double-tap", "Zoom in / back to fit width"],
-    ["Pen", "Draw with the selected tool"], ["Pen eraser end / side button", "Erase"],
+    ["Pen", "Draw with the selected tool"],
     ["Middle-button drag", "Pan the page (any tool)"], ["Mouse wheel", "Scroll or zoom (choose in the ⋯ menu)"],
     ["Ctrl+wheel / Shift+wheel", "Zoom / the other wheel action"],
     ["Select tool: tap or drag a markup", "Select it, then move, reshape, retype or delete it (Delete key)"],
@@ -822,7 +891,10 @@ async function showHelp() {
     ["Edit content tool", "Drag a box to erase an area · tap a line of text to retype it (same font, size and colour); tap it again to change it"],
     ["Side by side", "Right-click (or press and hold) a PDF in the list › Open side by side (Ctrl+Shift+O) · every PDF works the same; the one you touched last is the one the toolbar and keys use · drag a title bar to move a PDF, the bar between them to resize · × closes it"],
     ["Snip tool (C)", "Drag a box, or draw around something, to copy it as a picture · then tap where it should go (or Ctrl+V) · it pastes at the same size; drag it or its corners"],
-    ["Press and hold the page (or right-click)", "Paste picture here · Snip · Open a PDF side by side · Close this PDF"],
+    ["Press and hold the page (or right-click)", "Paste here · Snip · Lasso · Select all markups · Open a PDF side by side · Close this PDF"],
+    ["Pen side button (hold) · Lasso tool (L)", "Draw round markups, or over them, to select them · drag to move, corners to resize · Copy, Duplicate, Delete on the bar; Ctrl+C / X / V / D, Delete, arrow keys"],
+    ["Pen eraser end (top button)", "Erase"],
+    ["Ctrl+F", "Search in the PDF · Enter / Shift+Enter for the next / previous result"],
     ["Pages panel", "Click a page to go to it · drag pages to reorder (with a finger: drag the grip, or press and hold) · drop them on another open PDF to copy them there · right-click (or press and hold) to add, copy in, duplicate, rotate or delete"],
     ["File list: Ctrl+click / Shift+click", "Select several PDFs, then right-click › Merge · right-click a folder › Merge all PDFs in this folder"],
     ["Callout", "Drag from the spot you're marking to where the text goes, then type"],
@@ -1302,6 +1374,13 @@ async function confirmDiscard(P = active) {
   const { viewer, state } = P;
   viewer.commitEdits();
   if (!viewer.dirty) return true;
+  // With autosave on, closing just saves (unless that needs asking).
+  if (cfg.autosave) {
+    clearTimeout(P.autoTimer);
+    if (viewer.placing) viewer.finishPlacing(true);
+    await save({ quiet: true }, P);
+    if (!viewer.dirty) return true;
+  }
   activate(P);
   const r = await dialog({
     title: "Save changes?",
@@ -1357,12 +1436,16 @@ async function openIn(P, path, { force = false } = {}) {
     viewer.setTool(cfg.tool);
     docHist.undo = []; docHist.redo = [];
     updatePaneHead(P);
+    P.find = null;
+    P.autoBlocked = 0;
     if (P === active) {
       pagesPanel.setDocument(viewer.doc.pages, viewer.currentPage());
+      markupsPanel.reset(P.id, viewer.pageCount);
       updateUndoButtons();
       updateMeasureBar();
       $("#zoom-label").textContent = Math.round((viewer.scale * 72 / 96) * 100) + "%";
-    } else pagesPanel.forget(P.id);
+      findSync();
+    } else { pagesPanel.forget(P.id); markupsPanel.forget(P.id); }
     if (narrow()) toggleSidebar(false);
     saveSession();
     return true;
@@ -1418,12 +1501,29 @@ const PAPER = [["A4", 210, 297, "mm"], ["A3", 297, 420, "mm"], ["A5", 148, 210, 
 const pageWord = (n) => (n === 1 ? "1 page" : `${n} pages`);
 const range = (a, n) => Array.from({ length: n }, (_, k) => a + k);
 
-function togglePages(force) {
-  cfg.pagesOpen = force ?? !cfg.pagesOpen;
-  pagesPanel.show(cfg.pagesOpen);
-  $("#btn-pages").classList.toggle("on", cfg.pagesOpen);
+// The panel on the right: Pages, Markups or Search results (null: hidden).
+// Only the tab in view does any work.
+function showPanel(tab) {
+  cfg.pagesOpen = !!tab;
+  if (tab) cfg.panelTab = tab;
+  $("#rpanel").hidden = !tab;
+  for (const b of document.querySelectorAll(".rp-tab")) b.classList.toggle("active", b.dataset.tab === tab);
+  pagesPanel.show(tab === "pages");
+  markupsPanel.show(tab === "marks");
+  $("#findlist").hidden = tab !== "find";
+  if (tab === "find") renderFindList();
+  $("#btn-pages").classList.toggle("on", tab === "pages");
+  $("#btn-marks").classList.toggle("on", tab === "marks");
   saveCfg();
 }
+const panelIs = (tab) => cfg.pagesOpen && cfg.panelTab === tab;
+function togglePages(force) { showPanel((force ?? !panelIs("pages")) ? "pages" : null); }
+function toggleMarks(force) { showPanel((force ?? !panelIs("marks")) ? "marks" : null); }
+document.querySelector("#rpanel .rp-tabs").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-tab]");
+  if (t) showPanel(t.dataset.tab);
+  else if (e.target.closest(".rp-close")) showPanel(null);
+});
 
 function showNewPages(P, pages, focus, keep, select) {
   const { viewer, state } = P;
@@ -1434,8 +1534,11 @@ function showNewPages(P, pages, focus, keep, select) {
   viewer.setTool(cfg.tool);
   viewer.markChanged();
   updatePaneHead(P);
-  if (P !== active) { pagesPanel.forget(P.id); return; }
+  P.find = null;
+  if (P !== active) { pagesPanel.forget(P.id); markupsPanel.forget(P.id); return; }
   pagesPanel.setDocument(viewer.doc.pages, focus, select);
+  markupsPanel.reset(P.id, pages.length);
+  findSync();
   updateUndoButtons();
   updateTitle();
 }
@@ -1655,6 +1758,8 @@ async function insertPagesDialog(path, at = pagesPanel.insertAt()) {
 // any app) and kept here with its size, so Ctrl+V pastes it back at exactly
 // the same size, ready to move or resize.
 let clip = null; // { id, png, w, h } (w, h in points)
+let markClip = null; // markups copied: { id, items, box }
+let lastCopied = null; // "marks" or "picture": what Paste uses when the clipboard can't tell
 
 async function snipFrom(eng, s) {
   const w = s.rect[2] - s.rect[0], h = s.rect[3] - s.rect[1];
@@ -1668,6 +1773,7 @@ async function snipFrom(eng, s) {
   if (s.poly) png = await lassoCut(png, s.rect, s.poly, res);
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   clip = { id, png, w, h };
+  lastCopied = "picture";
   // The system clipboard gets the picture (for any app) plus a small html
   // part marking it as ours, so pasting it back here keeps its exact size.
   try {
@@ -1693,39 +1799,95 @@ async function lassoCut(png, rect, poly, res) {
   return new Uint8Array(await (await c.convertToBlob({ type: "image/png" })).arrayBuffer());
 }
 
-// What there is to paste: our last snip (at its exact size), or a picture
-// copied in another app (at its usual size on screen, 96 dpi).
-async function clipboardPicture() {
-  let sys = null;
+async function readClipboard() {
   try {
     for (const it of await navigator.clipboard.read()) {
-      if (!it.types.includes("image/png")) continue;
       const html = it.types.includes("text/html") ? await (await it.getType("text/html")).text() : "";
-      sys = { blob: await it.getType("image/png"), id: (/data-eagles-snip="([\w-]+)"/.exec(html) || [])[1] || null };
-      break;
+      const png = it.types.includes("image/png") ? await it.getType("image/png") : null;
+      return { ok: true, html, png };
     }
-  } catch {}
-  if (sys && !(clip && sys.id === clip.id)) {
-    const bm = await createImageBitmap(sys.blob);
-    const pic = { png: new Uint8Array(await sys.blob.arrayBuffer()), w: bm.width * 0.75, h: bm.height * 0.75 };
+    return { ok: true, html: "", png: null };
+  } catch { return { ok: false, html: "", png: null }; }
+}
+
+// The picture to paste: our last snip (at its exact size), or one copied in
+// another app (at its usual size on screen, 96 dpi).
+async function clipboardPicture(cb) {
+  const id = (/data-eagles-snip="([\w-]+)"/.exec(cb.html) || [])[1] || null;
+  if (cb.png && !(clip && id === clip.id)) {
+    const bm = await createImageBitmap(cb.png);
+    const pic = { png: new Uint8Array(await cb.png.arrayBuffer()), w: bm.width * 0.75, h: bm.height * 0.75 };
     bm.close();
     return pic;
   }
   return clip;
 }
 
-// Paste into the active PDF: at `at` ({ page, p }: a tap or a held finger),
-// where the pointer is, or in the middle of the view (`center`).
-async function paste({ center = false, at = null } = {}) {
+const plural = (n, w) => (n === 1 ? `1 ${w}` : `${n} ${w}s`);
+
+// Paste into the active PDF what was copied last: markups (copied from the
+// lasso's selection), or a picture. At `at` ({ page, p }: a tap or a held
+// finger), where the pointer is, or in the middle of the view (`center`).
+// `picture`: a tap with the Snip tool, which always pastes the snip.
+async function paste({ center = false, at = null, picture = false } = {}) {
   const P = active, { viewer, state } = P;
   if (!state.path) return;
-  const pic = await clipboardPicture();
-  if (!pic) { toast("Nothing to paste yet: choose Snip (scissors), then drag a box or draw around something"); return; }
+  const cb = await readClipboard();
+  const marksId = (/data-eagles-marks="([\w-]+)"/.exec(cb.html) || [])[1];
+  const marks = !picture && markClip && (marksId === markClip.id || (!marksId && !cb.png && lastCopied === "marks"));
   const pt = at || viewer.pastePoint(center);
   if (!pt || !viewer.doc) return;
+  if (marks) {
+    if (cfg.tool !== "lasso" && cfg.tool !== "select") setTool("lasso");
+    const n = viewer.pasteMarks(markClip, pt.page, pt.p);
+    toast(`Pasted ${plural(n, "markup")} · drag to move, corners to resize`);
+    return;
+  }
+  const pic = await clipboardPicture(cb);
+  if (!pic) { toast("Nothing to paste yet: select markups with the Lasso and Copy, or snip part of a page"); return; }
   if (cfg.tool !== "select") setTool("select");
   const shrunk = viewer.insertPicture(pt.page, pt.p, pic.png, pic.w, pic.h);
   toast(shrunk ? "Pasted, made smaller to fit the page · drag to move, corners to resize" : "Pasted at the same size · drag to move, corners to resize");
+}
+
+// Markups selected with the lasso (or the one selected): copy, cut,
+// duplicate. They can be pasted on any page, in any open PDF.
+async function copyMarks({ cut = false } = {}) {
+  const v = active.viewer;
+  const c = await v.copyMarks();
+  if (!c) { toast("Select markups first: draw round them with the Lasso, or hold the pen's side button"); return false; }
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  markClip = { id, ...c };
+  lastCopied = "marks";
+  try {
+    await navigator.clipboard.write([new ClipboardItem({
+      "text/html": new Blob([`<div data-eagles-marks="${id}">${c.items.length} markups</div>`], { type: "text/html" }),
+      "text/plain": new Blob([plural(c.items.length, "markup") + " copied in Eagles PDF viewer"], { type: "text/plain" }),
+    })]);
+  } catch {}
+  const n = c.items.length;
+  if (cut) {
+    if (v.groupCount) v.deleteGroup(); else v.deleteSelectedShape();
+    toast(`Cut ${plural(n, "markup")} · Paste puts them back where you tap`, "", { label: "Paste", run: () => paste({ center: true }) });
+  } else {
+    toast(`Copied ${plural(n, "markup")} · Paste puts them where you tap or point`, "", { label: "Paste", run: () => paste({ center: true }) });
+  }
+  return true;
+}
+
+async function duplicateMarks() {
+  const v = active.viewer, page = v.groupSel ? v.groupSel.page : v.shapeSel?.page;
+  const c = await v.copyMarks();
+  if (!c) return;
+  const n = v.pasteMarks(c, page, null, 14);
+  toast(`Duplicated ${plural(n, "markup")}`);
+}
+
+function selectAllMarks(page) {
+  if (!viewer.doc) return;
+  if (cfg.tool !== "lasso" && cfg.tool !== "select") setTool("lasso");
+  const n = viewer.selectAllMarks(page);
+  toast(n ? `Selected ${plural(n, "markup")} on this page` : "No markups on this page");
 }
 
 // A finger held on the page, or a right-click: what you can do there.
@@ -1733,14 +1895,248 @@ function pageHoldMenu(P, h) {
   const at = h.page != null ? { page: h.page, p: h.p } : null;
   const v = P.viewer;
   showMenu({ x: h.x - 20, y: h.y + 14 }, [
-    { label: "Paste picture here", icon: "clipboard", key: keyOf("edit.paste"), run: () => paste({ at, center: !at }) },
+    { label: lastCopied === "marks" && markClip ? `Paste ${plural(markClip.items.length, "markup")} here` : "Paste picture here", icon: "clipboard", key: keyOf("edit.paste"), run: () => paste({ at, center: !at }) },
     { label: "Snip: copy part of a page", icon: "scissors", key: keyOf("tool.snip"), run: () => { setTool("snip"); toast(SNIP_HINT); } },
+    { label: "Lasso: select markups", icon: "lasso", key: keyOf("tool.lasso"), run: () => { setTool("lasso"); toast(LASSO_HINT); } },
+    { label: "Select all markups on this page", key: keyOf("edit.selectMarks"), run: () => selectAllMarks(h.page ?? undefined) },
     v.hasSelection && { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(v.sel.text) },
     "-",
     { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: panes.length >= MAX_PANES },
     { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(P) },
   ]);
 }
+
+// ------------------------------------------------------------------ autosave
+// With autosave on, each open PDF saves itself a few seconds after changes
+// stop (never while you're writing, typing or placing something). Erase areas
+// and retyped text are applied only when you save yourself, since that can't
+// be undone, and a file another program changed is never overwritten without
+// asking.
+const AUTOSAVE_MS = 3000;
+function setAutosave(on, announce = true) {
+  cfg.autosave = !!on;
+  saveCfg();
+  const b = $("#btn-autosave");
+  b.classList.toggle("on", cfg.autosave);
+  b.title = cfg.autosave ? "Autosave is on: changes save by themselves. Click to turn it off" : "Autosave is off: click to save changes by themselves";
+  if (announce) toast(cfg.autosave ? "Autosave on: changes save by themselves a few seconds after you stop" : "Autosave off: save with Ctrl+S");
+  if (cfg.autosave) for (const P of panes) if (P.viewer.dirty) scheduleAutosave(P);
+}
+function scheduleAutosave(P, ms = AUTOSAVE_MS) {
+  if (!cfg.autosave || !P.state.path) return;
+  clearTimeout(P.autoTimer);
+  P.autoTimer = setTimeout(() => autosave(P), ms);
+}
+async function autosave(P) {
+  if (!cfg.autosave || !panes.includes(P) || !P.state.path || !P.viewer.dirty) return;
+  const v = P.viewer;
+  if (v.action || v.editing || v.placing || v.mdraft || P.busy || P.state.saving || !modal.hidden) { scheduleAutosave(P, 1500); return; }
+  const pend = v.pendingContentEdits();
+  if (pend.erase || pend.lines) {
+    if (!P.autoNoted) { P.autoNoted = true; toast("Autosave is waiting: erase areas and edited text are applied when you save (Ctrl+S)"); }
+    return;
+  }
+  await save({ quiet: true }, P);
+}
+
+// ------------------------------------------------------------------ search
+// Ctrl+F: find words in the PDF in use. The edit worker searches a few pages
+// at a time, so results come in as it goes and the app stays responsive.
+// Matches are marked on the pages; Enter / Shift+Enter (or the arrows) go to
+// the next / previous one; the list button shows them all with their context.
+const findbar = $("#findbar"), findQ = $("#find-q");
+const FIND_MAX = 5000;
+let findTimer = 0, findRaf = 0;
+function openFind() {
+  if (!viewer.doc) { toast("Open a PDF first"); return; }
+  findbar.hidden = false;
+  active.el.append(findbar);
+  findQ.focus();
+  findQ.select();
+  findSync();
+}
+function closeFind() {
+  findbar.hidden = true;
+  for (const P of panes) { P.find = null; P.viewer.setFindHits(null); }
+  renderFindList();
+  if (document.activeElement === findQ) findQ.blur();
+}
+// The PDF in use shows results for what's typed (searching if needed).
+function findSync() {
+  if (findbar.hidden) return;
+  const P = active, q = findQ.value;
+  if (!P.viewer.doc) { updateFindUI(); return; }
+  if (P.find && P.find.q === q) showFind(P);
+  else runFind(P, q);
+}
+async function runFind(P, q) {
+  const F = (P.find = { q, hits: [], byPage: new Map(), cur: -1, done: false });
+  P.viewer.setFindHits(null);
+  if (P === active) { updateFindUI(); renderFindList(); }
+  if (!q.trim()) { F.done = true; if (P === active) updateFindUI(); return; }
+  const start = P.viewer.currentPage();
+  let from = 0;
+  try {
+    while (from >= 0 && F.hits.length < FIND_MAX) {
+      const r = await P.engine.find(q, from);
+      if (P.find !== F) return;
+      for (const pg of r.pages) {
+        const rects = [];
+        for (const h of pg.hits) { if (F.hits.length >= FIND_MAX) break; F.hits.push({ page: pg.page, k: rects.length, ...h }); rects.push(h.rect); }
+        if (rects.length) F.byPage.set(pg.page, rects);
+      }
+      from = r.next;
+      // Go to the first match from the page you're on, as soon as there is one.
+      if (F.cur < 0) { const k = F.hits.findIndex((h) => h.page >= start); if (k >= 0) { F.cur = k; showFind(P, true); continue; } }
+      showFindSoon(P);
+    }
+  } catch (err) {
+    if (P.find === F) toast("Search stopped: " + err.message, "error");
+  }
+  if (P.find !== F) return;
+  F.done = true;
+  if (F.cur < 0 && F.hits.length) { F.cur = 0; showFind(P, true); }
+  else showFind(P);
+}
+function showFindSoon(P) {
+  if (findRaf) return;
+  findRaf = requestAnimationFrame(() => { findRaf = 0; if (P.find) showFind(P); });
+}
+function showFind(P, go = false) {
+  const F = P.find, cur = F && F.cur >= 0 ? F.hits[F.cur] : null;
+  P.viewer.setFindHits(F ? F.byPage : null, cur ? { page: cur.page, k: cur.k } : null);
+  if (go && cur) P.viewer.revealRect(cur.page, cur.rect);
+  if (P === active) { updateFindUI(); renderFindList(); }
+}
+function findStep(dir) {
+  const P = active, F = P.find;
+  if (!F || !F.hits.length) { findSync(); return; }
+  F.cur = (F.cur + dir + F.hits.length) % F.hits.length;
+  showFind(P, true);
+}
+function updateFindUI() {
+  const F = active?.find, n = $("#find-n");
+  const many = F && F.hits.length >= FIND_MAX ? "+" : "";
+  if (!F || !F.q.trim()) n.textContent = "";
+  else if (!F.hits.length) n.textContent = F.done ? "No results" : "Searching…";
+  else n.textContent = `${F.cur + 1} of ${F.hits.length}${many}${F.done ? "" : "…"}`;
+  findbar.classList.toggle("none", !!F && F.done && !F.hits.length && !!F.q.trim());
+  $("#find-prev").disabled = $("#find-next").disabled = !F || !F.hits.length;
+}
+function renderFindList() {
+  const box = $("#findlist");
+  if (box.hidden) return;
+  const F = active?.find;
+  const n = F ? F.hits.length : 0;
+  let html = `<div class="mk-head"><span class="mk-title">Search <span class="mk-count">${F && F.q.trim() ? `(${n}${n >= FIND_MAX ? "+" : ""})` : ""}</span></span></div><div class="mk-list">`;
+  if (!F || !F.q.trim()) html += `<p class="mk-empty">Press Ctrl+F (or the magnifier) and type the words to find.</p>`;
+  else if (!n) html += `<p class="mk-empty">${F.done ? `No results for “${esc(F.q)}”.` : "Searching…"}</p>`;
+  else {
+    let page = -1;
+    F.hits.slice(0, 1500).forEach((h, k) => {
+      if (h.page !== page) {
+        page = h.page;
+        const name = viewer.doc?.pages[page]?.name;
+        html += `<div class="mk-pg">${esc(name ? `Page ${page + 1} · ${name}` : `Page ${page + 1}`)}</div>`;
+      }
+      const t = h.text || "";
+      html += `<div class="fl-row${k === F.cur ? " sel" : ""}" data-k="${k}" role="button" tabindex="0">${esc(t.slice(0, h.at))}<mark>${esc(t.slice(h.at, h.at + h.len))}</mark>${esc(t.slice(h.at + h.len))}</div>`;
+    });
+    if (n > 1500) html += `<p class="mk-empty">… and ${n - 1500} more.</p>`;
+  }
+  box.innerHTML = html + "</div>";
+  box.querySelector(".fl-row.sel")?.scrollIntoView({ block: "nearest" });
+}
+$("#findlist").addEventListener("click", (e) => {
+  const row = e.target.closest(".fl-row");
+  const F = active?.find;
+  if (!row || !F) return;
+  F.cur = +row.dataset.k;
+  showFind(active, true);
+});
+findQ.addEventListener("input", () => { clearTimeout(findTimer); findTimer = setTimeout(findSync, 220); });
+findQ.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    clearTimeout(findTimer);
+    if (!active.find || active.find.q !== findQ.value) findSync(); else findStep(e.shiftKey ? -1 : 1);
+  } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); }
+});
+$("#find-next").onclick = () => findStep(1);
+$("#find-prev").onclick = () => findStep(-1);
+$("#find-close").onclick = () => closeFind();
+$("#find-list").onclick = () => showPanel(panelIs("find") ? null : "find");
+
+// ------------------------------------------------------------------ toolbar (ribbon)
+// You choose which buttons the toolbar shows (⋯ → Customize the toolbar, or
+// right-click it). The buttons get smaller when there are many, so the
+// groups never run into each other; at the very smallest the tools scroll.
+const RIBBON = [
+  ["Window", [["sidebar", "File list button", true], ["title", "File name", true]]],
+  ["Tools", [["tool.select", "Select", true], ["tool.hand", "Pan", true], ["tool.highlight", "Highlight", true], ["tool.pen", "Pen", true], ["tool.box", "Shapes", true], ["tool.sign", "Signature", true], ["tool.eraser", "Eraser", true], ["tool.lasso", "Lasso select", true], ["tool.snip", "Snip", true], ["tool.content", "Edit content", true], ["tool.measure", "Measure", true]]],
+  ["Edit", [["style", "Colour and size", true], ["touch", "Finger draws", true], ["undo", "Undo", true], ["redo", "Redo", true], ["paste", "Paste", false]]],
+  ["View", [["search", "Search", true], ["zoomout", "Zoom out", true], ["zoom", "Zoom level", true], ["zoomin", "Zoom in", true], ["fitw", "Fit width", true], ["fitp", "Fit page", true], ["side", "Open side by side", false], ["fullscreen", "Full screen", false]]],
+  ["Panels and saving", [["pages", "Pages panel", true], ["marks", "Markups list", true], ["autosave", "Autosave on / off", false], ["save", "Save", true]]],
+];
+const RB_DEFAULT = new Map(RIBBON.flatMap(([, items]) => items.map(([id, , on]) => [id, on])));
+const RB_SIZES = { large: 40, medium: 34, small: 28 };
+if (!cfg.ribbon || typeof cfg.ribbon !== "object") cfg.ribbon = {};
+const rbShown = (id) => (typeof cfg.ribbon[id] === "boolean" ? cfg.ribbon[id] : RB_DEFAULT.get(id) !== false);
+function applyRibbon() {
+  for (const node of document.querySelectorAll("[data-rb]")) node.hidden = !rbShown(node.dataset.rb);
+  document.querySelector("[data-rb-sep]").hidden = !(rbShown("undo") || rbShown("redo") || rbShown("paste"));
+  $("#tools").hidden = ![...$("#tools").children].some((b) => !b.hidden);
+  fitToolbar();
+}
+let fitRaf = 0;
+function fitToolbar() {
+  cancelAnimationFrame(fitRaf);
+  fitRaf = requestAnimationFrame(() => {
+    const tb = $("#toolbar"), max = RB_SIZES[cfg.ribbonSize] || 40;
+    tb.classList.remove("squeeze");
+    for (const sz of [40, 37, 34, 31, 28, 26]) {
+      if (sz > max) continue;
+      tb.style.setProperty("--b", sz + "px");
+      if (tb.scrollWidth <= tb.clientWidth + 1) return;
+    }
+    tb.classList.add("squeeze");
+  });
+}
+window.addEventListener("resize", fitToolbar);
+function ribbonDialog() {
+  closePopover();
+  const sizes = [["auto", "Automatic (fits the window)"], ["large", "Large"], ["medium", "Medium"], ["small", "Small"]];
+  const html = `<p class="hint" style="margin-bottom:12px">Choose what the toolbar shows. When it shows a lot, the buttons get smaller so everything fits. Anything you hide is still in the ⋯ menu and on its keyboard shortcut.</p>
+    <div class="rb-groups">${RIBBON.map(([g, items]) => `<div class="rb-group"><div class="pop-title">${esc(g)}</div>${items.map(([id, label]) => `<label class="pop-check"><input type="checkbox" data-rb-id="${id}"${rbShown(id) ? " checked" : ""}> ${esc(label)}</label>`).join("")}</div>`).join("")}</div>
+    <label class="field rb-size"><span>Button size</span><select id="rb-size">${sizes.map(([k, l]) => `<option value="${k}"${(cfg.ribbonSize || "auto") === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>`;
+  return dialog({
+    title: "Customize the toolbar",
+    wide: true,
+    html,
+    buttons: [{ id: "reset", label: "Reset to default", left: true }, { id: "ok", label: "Done", primary: true }],
+    onMount(d) {
+      d.addEventListener("change", (e) => {
+        if (e.target.id === "rb-size") cfg.ribbonSize = e.target.value;
+        else if (e.target.dataset.rbId) cfg.ribbon[e.target.dataset.rbId] = e.target.checked;
+        else return;
+        applyRibbon();
+        saveCfg();
+      });
+    },
+  }).then((r) => {
+    if (r !== "reset") return;
+    cfg.ribbon = {};
+    cfg.ribbonSize = "auto";
+    applyRibbon();
+    saveCfg();
+    ribbonDialog();
+  });
+}
+$("#toolbar").addEventListener("contextmenu", (e) => {
+  if (e.target.closest("input")) return;
+  e.preventDefault();
+  showMenu({ x: e.clientX, y: e.clientY + 8 }, [{ label: "Customize the toolbar…", icon: "sliders", key: keyOf("view.ribbon"), run: () => ribbonDialog() }]);
+});
 
 // ------------------------------------------------------------------ merging
 const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, "");
@@ -1884,16 +2280,18 @@ async function embedMarkups() {
   if (reopen) { await openIn(P, reopen, { force: true }); toast("Markups embedded"); }
 }
 
-async function save({ as = false } = {}, P = active) {
+// `quiet`: autosave (no messages; skips anything that needs asking).
+async function save({ as = false, quiet = false } = {}, P = active) {
   const { viewer, engine, state } = P;
   if (!state.path || state.saving) return;
-  viewer.commitEdits();
-  if (viewer.placing) viewer.finishPlacing(true);
-  if (!as && !viewer.dirty) { toast("No changes to save"); return; }
+  if (!quiet) viewer.commitEdits();
+  if (viewer.placing && !quiet) viewer.finishPlacing(true);
+  if (!as && !viewer.dirty) { if (!quiet) toast("No changes to save"); return; }
   // Erase areas and edited text are applied when saving; after that they
   // can't be undone.
   const pend = viewer.pendingContentEdits();
   const erase = pend.erase + pend.lines;
+  if (quiet && erase) return;
   if (pend.erase) {
     const r = await dialog({
       title: "Erase for good?",
@@ -1926,7 +2324,11 @@ async function save({ as = false } = {}, P = active) {
     } else {
       // Don't silently clobber edits another program made after we opened the file.
       const cur = await host.stat(path).catch(() => null);
-      if (cur && state.mtime && Math.abs(cur.mtime - state.mtime) > 2) {
+      if (cur && state.mtime && Math.abs(cur.mtime - state.mtime) > 2 && quiet) {
+        // Autosave never overwrites another program's changes.
+        skip = true;
+        if (P.autoBlocked !== cur.mtime) { P.autoBlocked = cur.mtime; toast(`Autosave paused: “${baseName(path)}” was changed by another program. Press Ctrl+S to choose what to do.`, "error"); }
+      } else if (cur && state.mtime && Math.abs(cur.mtime - state.mtime) > 2) {
         const r = await dialog({
           title: "File changed on disk",
           message: `“${baseName(path)}” was changed by another program after you opened it. Saving here will replace those changes.`,
@@ -1941,7 +2343,8 @@ async function save({ as = false } = {}, P = active) {
         const after = await host.stat(path).catch(() => null);
         if (after) state.mtime = after.mtime;
         viewer.markSaved(seq);
-        if (erase) reopen = path; else toast("Saved");
+        P.autoNoted = false;
+        if (erase) reopen = path; else if (!quiet) toast("Saved");
       }
     }
     updatePaneHead(P);
@@ -1960,6 +2363,10 @@ async function save({ as = false } = {}, P = active) {
     if (pend.erase) parts.push(pend.erase === 1 ? "1 area erased" : `${pend.erase} areas erased`);
     if (pend.lines) parts.push(pend.lines === 1 ? "1 line edited" : `${pend.lines} lines edited`);
     toast(parts.join(" · "));
+  }
+  if (failure && quiet) {
+    toast(`Autosave couldn't save “${baseName(state.path)}”: ${failure.message}`, "error");
+    return;
   }
   if (failure) {
     const r = await dialog({
@@ -2117,17 +2524,26 @@ const COMMANDS = [
   { id: "file.showInFolder", group: "File", label: "Show in folder", keys: [], when: () => !!state.path, run: () => host.showInFolder(state.path) },
   { id: "file.next", group: "File", label: "Next PDF in the list", keys: ["Alt+ArrowDown"], run: () => stepFile(1) },
   { id: "file.prev", group: "File", label: "Previous PDF in the list", keys: ["Alt+ArrowUp"], run: () => stepFile(-1) },
-  { id: "file.filter", group: "File", label: "Filter the file list", keys: ["Ctrl+F"], typing: true, run: () => { toggleSidebar(true); sidebar.input.focus(); sidebar.input.select(); } },
+  { id: "file.filter", group: "File", label: "Filter the file list", keys: ["Ctrl+Shift+F"], typing: true, run: () => { toggleSidebar(true); sidebar.input.focus(); sidebar.input.select(); } },
+  { id: "file.autosave", group: "File", label: "Autosave on / off", keys: [], typing: true, run: () => setAutosave(!cfg.autosave) },
+  // Search
+  { id: "find.open", group: "Search", label: "Search in this PDF", keys: ["Ctrl+F"], typing: true, run: () => (hasDoc() ? openFind() : (toggleSidebar(true), sidebar.input.focus())) },
+  { id: "find.next", group: "Search", label: "Next result", keys: ["F3"], typing: true, run: () => findStep(1) },
+  { id: "find.prev", group: "Search", label: "Previous result", keys: ["Shift+F3"], typing: true, run: () => findStep(-1) },
+  { id: "panel.marks", group: "Search", label: "Show / hide the markups list", keys: ["Ctrl+Shift+M"], typing: true, run: () => toggleMarks() },
   { id: "file.sidebar", group: "File", label: "Show / hide the file list", keys: ["Ctrl+B"], typing: true, run: () => toggleSidebar() },
   { id: "file.refresh", group: "File", label: "Refresh the file list", keys: ["F5"], when: () => !!cfg.folder, run: () => loadFolder(cfg.folder, false) },
   // Edit
   { id: "edit.undo", group: "Edit", label: "Undo", keys: ["Ctrl+Z"], run: () => undo() },
   { id: "edit.redo", group: "Edit", label: "Redo", keys: ["Ctrl+Y", "Ctrl+Shift+Z"], run: () => redo() },
-  { id: "edit.copy", group: "Edit", label: "Copy selected text", keys: ["Ctrl+C"], when: () => viewer.hasSelection, run: () => copyText(viewer.sel.text) },
-  { id: "edit.paste", group: "Edit", label: "Paste a picture (at the same size)", keys: ["Ctrl+V"], when: hasDoc, run: () => paste() },
+  { id: "edit.copy", group: "Edit", label: "Copy (selected text or markups)", keys: ["Ctrl+C"], when: () => viewer.hasSelection || !!viewer.groupCount || !!viewer.selectedShape, run: () => (viewer.hasSelection ? copyText(viewer.sel.text) : copyMarks()) },
+  { id: "edit.cut", group: "Edit", label: "Cut the selected markups", keys: ["Ctrl+X"], when: () => !!viewer.groupCount || !!viewer.selectedShape, run: () => copyMarks({ cut: true }) },
+  { id: "edit.paste", group: "Edit", label: "Paste (markups, or a picture at the same size)", keys: ["Ctrl+V"], when: hasDoc, run: () => paste() },
+  { id: "edit.duplicate", group: "Edit", label: "Duplicate the selected markups", keys: ["Ctrl+D"], when: () => !!viewer.groupCount || !!viewer.selectedShape, run: () => duplicateMarks() },
+  { id: "edit.selectMarks", group: "Edit", label: "Select all markups on the page", keys: ["Ctrl+Shift+A"], when: hasDoc, run: () => selectAllMarks() },
   { id: "edit.selectAll", group: "Edit", label: "Select all text on the page", keys: ["Ctrl+A"], when: hasDoc, run: () => { if (cfg.tool !== "select") setTool("select"); viewer.selectAllOnPage(); } },
   { id: "edit.editText", group: "Edit", label: "Edit the selected text box or callout", keys: ["Enter", "F2"], when: () => ["text", "callout"].includes(viewer.selectedShape), run: () => viewer.editSelectedText() },
-  { id: "edit.delete", group: "Edit", label: "Delete the selected markup or signature", keys: ["Delete", "Backspace"], when: () => !!viewer.selectedShape || viewer.placingExisting, run: () => (viewer.placingExisting ? viewer.finishPlacing("delete") : viewer.deleteSelectedShape()) },
+  { id: "edit.delete", group: "Edit", label: "Delete the selected markups", keys: ["Delete", "Backspace"], when: () => !!viewer.selectedShape || !!viewer.groupCount || viewer.placingExisting, run: () => (viewer.placingExisting ? viewer.finishPlacing("delete") : viewer.groupCount ? viewer.deleteGroup() : viewer.deleteSelectedShape()) },
   // Tools
   { id: "tool.select", group: "Tools", label: "Select (text and markups)", keys: ["V"], run: () => setTool("select") },
   { id: "tool.hand", group: "Tools", label: "Pan", keys: ["H"], run: () => setTool("hand") },
@@ -2139,6 +2555,9 @@ const COMMANDS = [
   { id: "tool.measure", group: "Tools", label: "Measure", keys: ["R"], run: () => setTool("measure") },
   { id: "tool.content", group: "Tools", label: "Edit content tool", keys: ["X"], run: () => setTool("content") },
   { id: "tool.snip", group: "Tools", label: "Snip: copy an area as a picture", keys: ["C"], run: () => setTool("snip") },
+  { id: "tool.lasso", group: "Tools", label: "Lasso: select several markups", keys: ["L"], run: () => setTool("lasso") },
+  { id: "highlight.words", group: "Tools", label: "Highlighter highlights words", keys: [], run: () => setHighlightMode("words") },
+  { id: "highlight.draw", group: "Tools", label: "Highlighter draws freely", keys: [], run: () => setHighlightMode("draw") },
   { id: "tool.touch", group: "Tools", label: "Finger draws on / off", keys: ["T"], run: () => setTouchDraws(!cfg.touchDraws) },
   { id: "tool.menu", group: "Tools", label: "Colour and size menu for the current tool", keys: [], run: () => openToolMenu() },
   // Shapes
@@ -2166,6 +2585,7 @@ const COMMANDS = [
   { id: "view.prevPane", group: "View", label: "Go to the previous PDF side by side", keys: ["Ctrl+Shift+Tab"], typing: true, when: () => panes.length > 1, run: () => cyclePane(-1) },
   { id: "view.paneBack", group: "View", label: "Move this PDF left (or up)", keys: [], when: () => panes.indexOf(active) > 0, run: () => movePane(active, panes.indexOf(active) - 1) },
   { id: "view.paneForward", group: "View", label: "Move this PDF right (or down)", keys: [], when: () => panes.indexOf(active) < panes.length - 1, run: () => movePane(active, panes.indexOf(active) + 2) },
+  { id: "view.ribbon", group: "View", label: "Customize the toolbar…", keys: [], typing: true, run: () => ribbonDialog() },
   { id: "view.wheel", group: "View", label: "Switch the mouse wheel between scroll and zoom", keys: [], run: () => setWheel(cfg.wheel === "zoom" ? "scroll" : "zoom") },
   // Navigate
   { id: "nav.down", group: "Navigate", label: "Scroll down", keys: ["ArrowDown"], repeat: true, run: () => nv().scrollBy(0, 60) },
@@ -2192,11 +2612,19 @@ function contextKey(e) {
   if (e.key === "Escape") {
     if (!pop.hidden) closePopover();
     else if (viewer.placing) viewer.finishPlacing(false);
+    else if (viewer.groupCount) viewer.clearGroup();
     else if (viewer.selectedShape) viewer.deselectShape();
     else if (viewer.mdraft || viewer._calibrating) viewer.cancelMeasure();
     else if (viewer.hasSelection) viewer.clearSelection();
+    else if (!findbar.hidden) closeFind();
     else return false;
     return true;
+  }
+  // Arrow keys move markups selected with the lasso (Shift: further).
+  if (viewer.groupCount && e.key.startsWith("Arrow")) {
+    const st = e.shiftKey ? 10 : 1;
+    const d = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[e.key];
+    if (d) { viewer.nudgeGroup(...d); return true; }
   }
   if (viewer.placing && e.key === "Enter") { viewer.finishPlacing(true); return true; }
   if (cfg.tool === "measure" && viewer.mdraft) {
@@ -2228,6 +2656,12 @@ const TITLES = {
   "tool.pen": [".tool[data-tool=pen]", "Pen"],
   "tool.box": [".tool[data-tool=box]", "Shapes: box, line, arrow, cloud, callout, text. Tap again to choose. To move or edit a shape, use Select"],
   "tool.sign": [".tool[data-tool=sign]", "Signature: add your signature, then drag it into place; tap a placed one to move, resize or delete it"],
+  "tool.lasso": [".tool[data-tool=lasso]", "Lasso select: draw round markups (or over them) to select them, then move, resize, copy or delete them. Or hold the pen's side button with any tool"],
+  "find.open": ["#btn-search", "Search in this PDF"],
+  "panel.marks": ["#btn-marks", "Markups: a list of every markup in this PDF"],
+  "edit.paste": ["#btn-paste", "Paste: markups you copied, or a picture, where you point or in the middle"],
+  "view.side": ["#btn-side", "Open a PDF side by side"],
+  "view.fullscreen": ["#btn-full", "Full screen"],
   "tool.snip": [".tool[data-tool=snip]", "Snip: drag a box, or draw around something, to copy it as a picture; then tap where it should go (or Ctrl+V) to paste it at the same size"],
   "tool.content": [".tool[data-tool=content]", "Edit content: drag a box to erase an area of the page; tap a line of text to retype it in the same font"],
   "tool.eraser": [".tool[data-tool=eraser]", "Eraser"],
@@ -2376,7 +2810,9 @@ appEl.classList.add("no-doc");
 toggleSidebar(cfg.sidebarOpen);
 if (!["number", "name", "both"].includes(cfg.pageLabels)) cfg.pageLabels = "both";
 pagesPanel.labelMode = cfg.pageLabels;
-togglePages(cfg.pagesOpen);
+showPanel(cfg.pagesOpen ? (["pages", "marks", "find"].includes(cfg.panelTab) ? cfg.panelTab : "pages") : null);
+applyRibbon();
+setAutosave(cfg.autosave, false);
 applyStyles();
 setWheel(cfg.wheel, false);
 setTool(cfg.tool);
@@ -2425,6 +2861,7 @@ else { sidebar.setRoot(null); sidebar.setTree(null); }
 // Expose for automated tests.
 window.__inkleaf = {
   get viewer() { return viewer; }, get engine() { return engine; }, get state() { return state; }, get active() { return active; },
-  panes, activate, openBeside, closePane, movePane, cyclePane, paste,
+  panes, activate, openBeside, closePane, movePane, cyclePane, paste, copyMarks, duplicateMarks, selectAllMarks, setAutosave,
+  markupsPanel, openFind, closeFind, findStep, applyRibbon, ribbonDialog, fitToolbar, showPanel, get find() { return active?.find; },
   sidebar, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib,
 };
