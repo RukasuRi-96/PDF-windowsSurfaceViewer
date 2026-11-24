@@ -293,6 +293,45 @@ function fileAnnots(file) {
   await page.waitForTimeout(4500);
   console.log('autosave off: still unsaved after 4.5 s', await page.evaluate(`${V}.dirty`));
   await page.screenshot({ path: W + '/lasso-search.png' });
+
+  // ---- 7. A 200% screen (Surface Pro): the loop is drawn under the pen
+  // while drawing it (checked mid-stroke on the live canvas), like ink.
+  const ctx2 = await browser.newContext({ viewport: { width: 1290, height: 860 }, deviceScaleFactor: 2, hasTouch: true });
+  const pg = await ctx2.newPage();
+  const cdp2 = await ctx2.newCDPSession(pg);
+  pg.on('pageerror', e => errs.push(`[pageerror 200%] ${e.message}`));
+  await pg.goto(url);
+  await pg.waitForTimeout(1000);
+  await pg.click('text=Letter');
+  await pg.waitForFunction(() => window.__inkleaf.viewer.pageCount > 0);
+  await pg.waitForTimeout(500);
+  // Is the live canvas drawn at screen point (x, y)? Also at the spot the
+  // old bug drew it (half the distance from the view's corner).
+  const liveAt = (x, y) => pg.evaluate(([x, y]) => {
+    const v = window.__inkleaf.viewer, r = v.root.getBoundingClientRect(), d = v.dpr;
+    const px = (cx, cy) => { const a = v.liveCtx.getImageData(Math.round(cx) - 3, Math.round(cy) - 3, 7, 7).data; let m = 0; for (let k = 3; k < a.length; k += 4) m = Math.max(m, a[k]); return m; };
+    return { dpr: d, here: px((x - r.left) * d, (y - r.top) * d), half: px((x - r.left) * d / 2, (y - r.top) * d / 2) };
+  }, [x, y]);
+  const r2 = await pg.evaluate(() => { const r = window.__inkleaf.viewer.root.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; });
+  const cx = r2[0] + r2[2] * 0.6, cy = r2[1] + r2[3] * 0.55;
+  const ev = (type, [x, y], button, buttons) => cdp2.send('Input.dispatchMouseEvent', { type, x, y, pointerType: 'pen', force: 0.5, button, buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
+  const midStroke = async (pts, button, buttons) => {
+    await ev('mouseMoved', pts[0], 'none', 0);
+    await ev('mousePressed', pts[0], button, buttons);
+    for (const q of pts.slice(1)) { await ev('mouseMoved', q, button, buttons); await pg.waitForTimeout(8); }
+    await pg.waitForTimeout(60); // a frame for the drawing
+    const last = pts[pts.length - 1], mid = pts[Math.floor(pts.length / 2)];
+    const at = await liveAt(mid[0], mid[1]);
+    await ev('mouseReleased', last, button, 0);
+    await pg.waitForTimeout(300);
+    return at;
+  };
+  const arc = []; for (let k = 0; k <= 20; k++) { const a = (k / 20) * 1.5 * Math.PI; arc.push([cx + 90 * Math.cos(a), cy + 60 * Math.sin(a)]); }
+  const lassoAt = await midStroke(arc, 'right', 2);
+  await pg.keyboard.press('p'); // a fresh window starts on the Select tool
+  const inkAt = await midStroke(H.line(cx - 80, cy + 100, cx + 40, cy + 120, 12), 'left', 1);
+  console.log('200% screen (device pixel ratio', lassoAt.dpr + '): pen side-button lasso drawn under the pen', lassoAt.here > 0, '· not off at half the distance', lassoAt.half === 0, '· ink drawn under the pen', inkAt.here > 0, inkAt.half === 0);
+  await ctx2.close();
   console.log(errs.length ? errs.join('\n') : 'no errors');
   await browser.close();
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

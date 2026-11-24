@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.9.0** · Windows 10 or 11, 64-bit
+**Current version: 1.9.1** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)

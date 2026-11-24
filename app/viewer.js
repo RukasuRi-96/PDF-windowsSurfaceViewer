@@ -2295,6 +2295,10 @@ export class Viewer {
       this._clearLive();
       const c = this.liveCtx;
       c.save();
+      // Screen points to canvas pixels (2 per point on a 200% display), as
+      // every other live drawing does; without it the loop shows up away
+      // from the pen on a high-DPI screen.
+      this._liveClipToPage(a.page);
       c.beginPath();
       a.pts.forEach((p, k) => { const [x, y] = this._screenOf(a.page, p); if (k) c.lineTo(x, y); else c.moveTo(x, y); });
       c.fillStyle = "rgba(47, 111, 237, 0.08)";
