@@ -342,6 +342,14 @@ export class Viewer {
   // `n` PDFs open side by side share the tile memory.
   setShare(n) { this.maxTiles = Math.max(70, Math.round(TILE_BUDGET / Math.max(1, n))); }
 
+  // A tab that isn't shown: its sharp tiles are freed (the page images stay,
+  // so it shows at once when it comes back, then sharpens).
+  sleep() {
+    if (!this.doc) return;
+    for (const s of this.doc.states.values()) this._dropTiles(s, null);
+  }
+  wake() { if (this.doc) this._update(); }
+
   // This view is gone for good (its PDF was closed side by side).
   destroy() {
     this.close();

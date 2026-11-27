@@ -83,30 +83,68 @@ const MAIN_RENDERERS = Math.max(2, Math.min(mem <= 8 ? 3 : 4, Math.floor(hc / 3)
 const MAX_PANES = 4;
 
 // ------------------------------------------------------------------ open PDFs
-// Every open PDF is a pane with its own engine, view, file and undo history.
-// Several can sit side by side and they all work the same way: the toolbar,
-// keys, Pages panel, title and Save act on the active one, which is the PDF
+// Every open PDF is a tab (in `panes`) with its own engine, view, file and
+// undo history. Tabs sit in panes side by side (`groups`, up to four), each
+// with a tab bar; one tab of each is shown. They all work the same way: the
+// toolbar, keys, Pages panel, title and Save act on the active PDF, the one
 // touched last. `engine`, `viewer`, `state` and `docHist` are always the
-// active pane's; async work that must stay with one pane keeps its own.
-const panes = [];
+// active one's; async work that must stay with one PDF keeps its own.
+// Opening a PDF adds a tab, so the one you were reading stays open. A tab
+// out of view goes to sleep after a while (its render workers stop; its
+// document and unsaved changes stay), so many tabs don't take much memory.
+const panes = [];   // every open PDF (one per tab), in the order they were opened
+const groups = [];  // the panes side by side, left to right (or top to bottom)
 let active = null, engine = null, viewer = null, state = null, docHist = null;
-let paneSeq = 0;
+let paneSeq = 0, groupSeq = 0;
 const panesEl = $("#panes");
+const MAX_TABS = 20;
 const samePath = (a, b) => !!a && !!b && (host.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+const isShown = (P) => !!P && P.group?.shown === P;
+const shownPanes = () => groups.map((G) => G.shown).filter(Boolean);
+const renderersFor = () => (groups.length > 1 ? 2 : MAIN_RENDERERS);
+// Every tab in the order they appear (pane by pane, left to right).
+const tabOrder = () => groups.flatMap((G) => G.tabs);
 
-function createPane(at = panes.length) {
+function createGroup(at = groups.length) {
+  const el = document.createElement("div");
+  el.className = "group";
+  el.innerHTML = `<div class="tabbar"><div class="tabs" role="tablist"></div><span class="pane-page"></span>` +
+    `<button class="btn icon-btn" data-act="menu" title="More">${icon("more")}</button></div><div class="group-stack"></div>`;
+  const G = { id: ++groupSeq, el, weight: 1, tabs: [], shown: null };
+  G.bar = el.querySelector(".tabbar");
+  G.tabsEl = el.querySelector(".tabs");
+  G.stack = el.querySelector(".group-stack");
+  G.bar.querySelector("[data-act=menu]").addEventListener("click", (e) => groupMenu(G, e.currentTarget));
+  // The mouse wheel scrolls the tabs sideways when they don't all fit.
+  G.tabsEl.addEventListener("wheel", (e) => {
+    if (G.tabsEl.scrollWidth <= G.tabsEl.clientWidth + 1) return;
+    G.tabsEl.scrollLeft += e.deltaY || e.deltaX;
+    e.preventDefault();
+  }, { passive: false });
+  // Touching the bar's empty part makes this pane the one in use.
+  G.bar.addEventListener("pointerdown", (e) => { if (!e.target.closest(".tab, button") && G.shown) activate(G.shown); });
+  groups.splice(at, 0, G);
+  return G;
+}
+
+// A new tab in pane G (by default the active one), after position `at`.
+// `show`: put it in front (otherwise it opens asleep, behind the others).
+function createPane(G = active?.group || groups[0] || createGroup(), at = G.tabs.length, { show = true } = {}) {
   const el = document.createElement("div");
   el.className = "pane";
-  el.innerHTML = `<div class="pane-head" title="Drag to move this PDF"><span class="pane-grip">${icon("grip")}</span><span class="pane-name"></span><span class="pane-dot" title="Unsaved changes"></span><span class="pane-page"></span>` +
-    `<button class="btn icon-btn" data-act="menu" title="More">${icon("more")}</button><button class="btn icon-btn" data-act="close" title="Close this PDF">${icon("x")}</button></div><div class="pane-view"></div>`;
+  el.innerHTML = `<div class="pane-view"></div>`;
+  const tab = document.createElement("div");
+  tab.className = "tab";
+  tab.setAttribute("role", "tab");
+  tab.innerHTML = `<span class="tab-name"></span><span class="pane-dot" title="Unsaved changes"></span>` +
+    `<button class="tab-x" data-act="close" title="Close this PDF (Ctrl+W)">${icon("x")}</button>`;
   const P = {
-    id: ++paneSeq, el, weight: 1, busy: false,
-    head: el.querySelector(".pane-head"), view: el.querySelector(".pane-view"),
+    id: ++paneSeq, el, tab, group: null, busy: false,
+    view: el.querySelector(".pane-view"),
     state: { path: null, gen: 0, saving: false, mtime: 0 },
     docHist: { undo: [], redo: [] },
   };
-  panesEl.appendChild(el);
-  P.engine = new Engine(WORKER, panes.length ? 2 : MAIN_RENDERERS);
+  P.engine = new Engine(WORKER, renderersFor(), { sleeping: !show });
   P.engine.ready().then(() => P.engine.setAuthor(host.userName || "")).catch(() => {});
   P.viewer = new Viewer(P.view, P.engine, paneCallbacks(P));
   for (const b of P.viewer.selBar.querySelectorAll("[data-act]")) b.innerHTML = icon(b.dataset.act === "copy" ? "copy" : "highlighter") + `<span>${b.textContent}</span>`;
@@ -117,15 +155,95 @@ function createPane(at = panes.length) {
   // Touching a PDF makes it the active one, before the touch does anything
   // (not a palm resting on it while the pen writes in another one).
   el.addEventListener("pointerdown", (e) => { if (!(e.pointerType === "touch" && penActive())) activate(P); }, true);
-  P.head.addEventListener("pointerdown", (e) => paneHeadDown(P, e));
-  P.head.addEventListener("click", (e) => {
-    const b = e.target.closest("[data-act]");
-    if (b?.dataset.act === "close") closePane(P);
-    else if (b?.dataset.act === "menu") paneMenu(P, b);
-  });
-  panes.splice(at, 0, P);
+  tab.addEventListener("pointerdown", (e) => tabDown(P, e));
+  tab.addEventListener("click", (e) => { if (e.target.closest(".tab-x")) { e.stopPropagation(); closePane(P); } });
+  tab.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); closePane(P); } });
+  tab.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!tab.classList.contains("held")) tabMenu(P, { x: e.clientX, y: e.clientY }); });
+  // While a tab is dragged with a finger, the bar doesn't scroll.
+  tab.addEventListener("touchmove", (e) => { if (P.tabDrag) e.preventDefault(); }, { passive: false });
+  panes.push(P);
+  placeTab(P, G, at);
+  if (show || !G.shown) showTab(P);
+  else { P.el.classList.remove("shown"); P.asleep = true; }
   layoutPanes();
   return P;
+}
+
+// Put P's tab at position `at` of pane G (taking it out of where it was).
+function placeTab(P, G, at) {
+  const from = P.group;
+  if (from) {
+    const k = from.tabs.indexOf(P);
+    if (k >= 0) { from.tabs.splice(k, 1); if (from === G && k < at) at--; }
+  }
+  at = Math.max(0, Math.min(at, G.tabs.length));
+  G.tabs.splice(at, 0, P);
+  P.group = G;
+  G.tabsEl.insertBefore(P.tab, G.tabs[at + 1]?.tab || null);
+  if (P.el.parentNode !== G.stack) G.stack.appendChild(P.el);
+}
+
+// Tabs out of view whose render workers still run (for a quick switch
+// back), most recently hidden last. At most two; others sleep.
+const warm = [];
+const WARM_TABS = 2, WARM_MS = 90e3;
+function sleepTab(P) {
+  const k = warm.indexOf(P);
+  if (k >= 0) warm.splice(k, 1);
+  clearTimeout(P.sleepTimer);
+  if (isShown(P) || !panes.includes(P) || P.asleep) return;
+  P.asleep = true;
+  P.viewer.sleep();
+  P.engine.sleep();
+  pagesPanel.forget(P.id);
+}
+function wakeTab(P) {
+  const k = warm.indexOf(P);
+  if (k >= 0) warm.splice(k, 1);
+  clearTimeout(P.sleepTimer);
+  P.asleep = false;
+  P.engine.wake(renderersFor());
+  P.viewer.wake();
+}
+
+// Commit what's being typed or placed in a PDF that's about to go out of use.
+function settle(P) {
+  const v = P.viewer;
+  v.commitEdits();
+  if (v.placing) v.finishPlacing(true);
+  if (v.selectedShape) v.deselectShape();
+  if (v.mdraft || v._calibrating) v.cancelMeasure();
+}
+
+// Bring P's tab to the front of its pane.
+function showTab(P) {
+  const G = P.group, prev = G.shown;
+  if (prev === P) return;
+  if (prev) {
+    settle(prev);
+    storeView(prev);
+    prev.el.classList.remove("shown");
+    prev.tab.classList.remove("on");
+    prev.tab.setAttribute("aria-selected", "false");
+    warm.push(prev);
+    while (warm.length > WARM_TABS) sleepTab(warm[0]);
+    clearTimeout(prev.sleepTimer);
+    prev.sleepTimer = setTimeout(() => sleepTab(prev), WARM_MS);
+    // With autosave on, a PDF you leave is saved straight away (as when
+    // opening another PDF used to close it).
+    if (prev.viewer.dirty) scheduleAutosave(prev, 250);
+  }
+  G.shown = P;
+  P.el.classList.add("shown");
+  P.tab.classList.add("on");
+  P.tab.setAttribute("aria-selected", "true");
+  wakeTab(P);
+  updatePaneHead(P);
+  // Restored behind the others and not opened yet: open it now.
+  if (P.pendingPath && !P.state.path) { const p = P.pendingPath; P.pendingPath = null; openIn(P, p); }
+  // The tab in view in its bar.
+  const tr = P.tab.getBoundingClientRect(), br = G.tabsEl.getBoundingClientRect();
+  if (tr.left < br.left || tr.right > br.right) P.tab.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 function paneCallbacks(P) {
@@ -166,6 +284,7 @@ function paneCallbacks(P) {
     },
     onHistory(canUndo, canRedo, dirty) {
       P.el.classList.toggle("dirty", dirty);
+      P.tab.classList.toggle("dirty", dirty);
       if (dirty) scheduleAutosave(P);
       if (!on()) return;
       updateUndoButtons();
@@ -189,18 +308,18 @@ function paneCallbacks(P) {
   };
 }
 
-// Make P the PDF the toolbar, keys and Pages panel work on.
+// Make P the PDF the toolbar, keys and Pages panel work on (bringing its
+// tab to the front).
 function activate(P) {
-  if (!P || P === active || !panes.includes(P)) return;
+  if (!P || !panes.includes(P)) return;
   const prev = active;
-  if (prev) {
-    const v = prev.viewer;
-    v.commitEdits();
-    if (v.placing) v.finishPlacing(true);
-    if (v.selectedShape) v.deselectShape();
-    if (v.mdraft || v._calibrating) v.cancelMeasure();
+  if (prev && prev !== P) {
+    settle(prev);
     prev.el.classList.remove("active");
   }
+  if (!isShown(P)) showTab(P);
+  for (const G of groups) G.el.classList.toggle("active", G === P.group);
+  if (prev === P) return;
   active = P;
   ({ engine, viewer, state, docHist } = P);
   P.el.classList.add("active");
@@ -227,47 +346,51 @@ function syncActive() {
   appEl.classList.toggle("no-doc", !state.path && panes.length === 1);
 }
 
+// The tab's name and unsaved dot; the page counter on the pane's bar.
 function updatePaneHead(P) {
-  const name = P.state.path ? baseName(P.state.path).replace(/\.pdf$/i, "") : "";
-  const n = P.head.querySelector(".pane-name");
-  n.textContent = name;
-  n.title = P.state.path || "";
-  P.el.classList.toggle("dirty", !!P.viewer.dirty);
+  const path = P.state.path || P.pendingPath;
+  const name = path ? baseName(path).replace(/\.pdf$/i, "") : "";
+  P.tab.querySelector(".tab-name").textContent = name || "Empty";
+  P.tab.title = path || "";
+  const dirty = !!P.viewer.dirty;
+  P.el.classList.toggle("dirty", dirty);
+  P.tab.classList.toggle("dirty", dirty);
+  if (!isShown(P)) return;
   const v = P.viewer;
-  P.head.querySelector(".pane-page").textContent = v.doc ? pageText(v, v.currentPage(), v.pageCount) : "";
+  P.group.bar.querySelector(".pane-page").textContent = v.doc ? pageText(v, v.currentPage(), v.pageCount) : "";
 }
 
-// Side by side, left to right (top to bottom when the window is taller than
-// wide), with a divider between each two to share out the room.
+// Panes side by side, left to right (top to bottom when the window is
+// taller than wide), with a divider between each two to share out the room.
 function layoutPanes() {
   const kids = [];
-  panes.forEach((P, k) => {
-    if (k) kids.push(P.split ||= makeSplit(P));
-    P.el.style.flex = `${P.weight} 1 0`;
-    kids.push(P.el);
+  groups.forEach((G, k) => {
+    if (k) kids.push(G.split ||= makeSplit(G));
+    G.el.style.flex = `${G.weight} 1 0`;
+    kids.push(G.el);
   });
   const cur = [...panesEl.children];
   if (cur.length !== kids.length || cur.some((c, i) => c !== kids[i])) panesEl.replaceChildren(...kids);
-  panesEl.classList.toggle("multi", panes.length > 1);
-  for (const P of panes) P.viewer.setShare(panes.length);
+  panesEl.classList.toggle("multi", groups.length > 1);
+  for (const P of panes) P.viewer.setShare(groups.length);
   paneOrientation();
 }
 function paneOrientation() {
   const r = $("#stage").getBoundingClientRect();
-  panesEl.classList.toggle("vertical", panes.length > 1 && r.height > r.width * 1.1);
+  panesEl.classList.toggle("vertical", groups.length > 1 && r.height > r.width * 1.1);
 }
 window.addEventListener("resize", paneOrientation);
 
-// The divider before pane P: drag it to give either neighbour more room.
-function makeSplit(P) {
+// The divider before pane G: drag it to give either neighbour more room.
+function makeSplit(G) {
   const bar = document.createElement("div");
   bar.className = "pane-split";
   bar.title = "Drag to resize";
   bar.addEventListener("pointerdown", (e) => {
-    const k = panes.indexOf(P);
+    const k = groups.indexOf(G);
     if (k < 1) return;
     e.preventDefault();
-    const A = panes[k - 1], B = P, vert = panesEl.classList.contains("vertical");
+    const A = groups[k - 1], B = G, vert = panesEl.classList.contains("vertical");
     const ra = A.el.getBoundingClientRect(), rb = B.el.getBoundingClientRect();
     const start = vert ? ra.top : ra.left, total = vert ? rb.bottom - ra.top : rb.right - ra.left;
     const sum = A.weight + B.weight;
@@ -294,75 +417,206 @@ function makeSplit(P) {
   return bar;
 }
 
-// Drag a PDF's title bar (finger, pen or mouse) to move it to another place.
-function paneHeadDown(P, e) {
-  if (e.button !== 0 || e.target.closest("button") || panes.length < 2) return;
-  const head = P.head, x0 = e.clientX, y0 = e.clientY;
-  try { head.setPointerCapture(e.pointerId); } catch {}
-  let D = null;
+// A tab: tap or click to show it. Drag it (mouse or pen straight away; a
+// finger after holding it for a moment, or at once by pulling it down) along
+// the bar to reorder, onto another pane's bar or page to move it there, or to
+// the edge of a pane to put it in a new pane on that side. A finger held
+// without moving, or a right-click, gives the tab's menu; a quick finger
+// swipe along the bar scrolls it.
+function tabDown(P, e) {
+  if (e.target.closest(".tab-x") || (e.pointerType === "mouse" && e.button !== 0)) return;
+  const touch = e.pointerType === "touch", tab = P.tab, x0 = e.clientX, y0 = e.clientY;
+  if (!touch) activate(P);
+  try { tab.setPointerCapture(e.pointerId); } catch {}
+  let D = null, held = false, gone = false;
+  const holdT = touch ? setTimeout(() => { held = true; tab.classList.add("held"); }, 380) : 0;
+  const end = () => {
+    clearTimeout(holdT);
+    tab.removeEventListener("pointermove", move);
+    tab.removeEventListener("pointerup", up);
+    tab.removeEventListener("pointercancel", up);
+    P.tabDrag = false;
+    setTimeout(() => tab.classList.remove("held"), 0);
+    if (D) { D.ghost.remove(); D.mark.remove(); D.zone?.classList.remove("tab-drop-target"); tab.classList.remove("moving"); }
+  };
   const move = (ev) => {
+    const d = Math.hypot(ev.clientX - x0, ev.clientY - y0);
     if (!D) {
-      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 10) return;
-      D = { ghost: document.createElement("div"), mark: document.createElement("div"), to: -1 };
+      if (touch && !held && !gone) {
+        // pulled down (or up) out of the bar: a drag; along it: scrolling
+        const dx = Math.abs(ev.clientX - x0), dy = Math.abs(ev.clientY - y0);
+        if (dy > 10 && dy > dx * 1.2) { held = true; clearTimeout(holdT); }
+        else if (dx > 10) { gone = true; clearTimeout(holdT); }
+      }
+      if (touch && !held) return;
+      if (d < 8) return;
+      P.tabDrag = true;
+      D = { ghost: document.createElement("div"), mark: document.createElement("div"), to: null, zone: null };
       D.ghost.className = "pane-ghost";
-      D.ghost.textContent = P.head.querySelector(".pane-name").textContent || "PDF";
+      D.ghost.textContent = tab.querySelector(".tab-name").textContent;
       D.mark.className = "pane-drop";
+      D.mark.hidden = true;
       document.body.append(D.ghost, D.mark);
-      P.el.classList.add("moving");
+      tab.classList.add("moving");
     }
     D.ghost.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 12}px)`;
-    const vert = panesEl.classList.contains("vertical"), pos = vert ? ev.clientY : ev.clientX;
-    let to = panes.length;
-    for (let k = 0; k < panes.length; k++) {
-      const r = panes[k].el.getBoundingClientRect();
-      if (pos < (vert ? r.top + r.height / 2 : r.left + r.width / 2)) { to = k; break; }
-    }
-    D.to = to;
-    const ref = panes[Math.min(to, panes.length - 1)].el.getBoundingClientRect(), sr = panesEl.getBoundingClientRect();
-    const edge = to < panes.length ? (vert ? ref.top : ref.left) : (vert ? ref.bottom : ref.right);
-    D.mark.className = "pane-drop" + (vert ? " v" : "");
-    D.mark.style.cssText = vert ? `left:${sr.left}px;width:${sr.width}px;top:${edge - 2}px` : `top:${sr.top}px;height:${sr.height}px;left:${edge - 2}px`;
+    const t = tabDropAt(ev.clientX, ev.clientY, P);
+    D.to = t;
+    D.zone?.classList.remove("tab-drop-target");
+    D.zone = null;
+    D.mark.hidden = !t || t.area;
+    D.mark.className = "pane-drop" + (t?.split ? " zone" : "");
+    D.mark.textContent = t?.split ? "New pane here" : "";
+    if (t?.area) { D.zone = t.G.el; D.zone.classList.add("tab-drop-target"); }
+    else if (t?.split) D.mark.style.cssText = `left:${t.x}px;top:${t.top}px;width:${t.w}px;height:${t.h}px`;
+    else if (t) D.mark.style.cssText = `left:${t.x - 2}px;top:${t.top}px;height:${t.h}px`;
   };
   const up = (ev) => {
-    head.removeEventListener("pointermove", move);
-    head.removeEventListener("pointerup", up);
-    head.removeEventListener("pointercancel", up);
-    if (!D) return;
-    D.ghost.remove();
-    D.mark.remove();
-    P.el.classList.remove("moving");
-    if (ev.type === "pointerup") movePane(P, D.to);
+    const drag = D, wasHeld = held;
+    end();
+    if (ev.type !== "pointerup") return;
+    if (drag) {
+      const t = drag.to;
+      if (t?.split) { const N = createGroup(t.gi); moveTab(P, N, 0); }
+      else if (t) moveTab(P, t.G, t.at);
+      return;
+    }
+    if (!touch || gone) return;
+    if (wasHeld) { const r = tab.getBoundingClientRect(); tabMenu(P, { x: r.left + 12, y: r.bottom + 4 }); }
+    else activate(P);
   };
-  head.addEventListener("pointermove", move);
-  head.addEventListener("pointerup", up);
-  head.addEventListener("pointercancel", up);
+  tab.addEventListener("pointermove", move);
+  tab.addEventListener("pointerup", up);
+  tab.addEventListener("pointercancel", up);
 }
 
-// Put pane P before position `to` (panes.length: at the end).
-function movePane(P, to) {
-  const k = panes.indexOf(P);
-  if (k < 0 || to === k || to === k + 1) return;
-  panes.splice(k, 1);
-  panes.splice(to > k ? to - 1 : to, 0, P);
+// Where a dragged tab would go: { G, at, x, top, h } on a tab bar;
+// { split: true, gi, x, top, w, h } near a pane's edge (a new pane there,
+// before groups[gi]); or { G, at, area: true } over the middle of another
+// pane's page (to the end of its tabs).
+function tabDropAt(x, y, P) {
+  const vert = panesEl.classList.contains("vertical");
+  // a new pane is possible if there's room, or if P's pane goes when P leaves
+  const canSplit = groups.length < MAX_PANES || P.group.tabs.length === 1;
+  for (const [gi, G] of groups.entries()) {
+    const br = G.bar.getBoundingClientRect();
+    if (x < br.left || x > br.right) continue;
+    if (y >= br.top - 14 && y <= br.bottom + 14) {
+      let at = G.tabs.length;
+      for (let k = 0; k < G.tabs.length; k++) {
+        const r = G.tabs[k].tab.getBoundingClientRect();
+        if (x < r.left + r.width / 2) { at = k; break; }
+      }
+      const ref = G.tabs[Math.min(at, G.tabs.length - 1)]?.tab.getBoundingClientRect();
+      const tx = !ref ? br.left + 8 : at < G.tabs.length ? ref.left : ref.right;
+      return { G, at, x: tx, top: br.top + 4, h: br.height - 8 };
+    }
+    const r = G.el.getBoundingClientRect();
+    if (y <= br.bottom || y > r.bottom) continue;
+    const sr = G.stack.getBoundingClientRect();
+    const f = vert ? (y - sr.top) / sr.height : (x - sr.left) / sr.width;
+    const edge = f < 0.2 ? 0 : f > 0.8 ? 1 : -1;
+    if (edge >= 0 && canSplit) {
+      const at = gi + edge;
+      // P alone in its pane, dropped right next to it: no change
+      const self = P.group.tabs.length === 1 && (groups[at] === P.group || groups[at - 1] === P.group);
+      if (!self) {
+        const half = vert ? { x: sr.left, top: edge ? sr.top + sr.height / 2 : sr.top, w: sr.width, h: sr.height / 2 } : { x: edge ? sr.left + sr.width / 2 : sr.left, top: sr.top, w: sr.width / 2, h: sr.height };
+        return { split: true, gi: at, ...half };
+      }
+    }
+    if (G !== P.group) return { G, at: G.tabs.length, area: true };
+  }
+  return null;
+}
+
+// Move tab P to position `at` of pane G; it comes to the front there.
+function moveTab(P, G, at) {
+  const from = P.group;
+  if (from === G) {
+    const k = G.tabs.indexOf(P);
+    if (at === k || at === k + 1) return;
+  }
+  const wasShown = isShown(P), k = from.tabs.indexOf(P);
+  if (from !== G && wasShown) { settle(P); from.shown = null; P.el.classList.remove("shown"); }
+  placeTab(P, G, at);
+  if (from !== G) {
+    if (!from.tabs.length) removeGroup(from);
+    else if (wasShown) showTab(from.tabs[Math.min(k, from.tabs.length - 1)]);
+  }
+  if (active === P && from !== G) { active = null; P.el.classList.remove("active"); }
+  activate(P);
   layoutPanes();
   saveSession();
 }
 
-function paneMenu(P, anchor) {
-  const k = panes.indexOf(P), vert = panesEl.classList.contains("vertical");
-  showMenu(anchor, [
-    { label: "Open another PDF here…", icon: "openFile", run: async () => { const p = await host.pickFile(); if (p) { activate(P); openFile(p); } } },
-    { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => { activate(P); openBeside(null); }, disabled: panes.length >= MAX_PANES },
-    "-",
-    { label: vert ? "Move up" : "Move left", icon: vert ? "moveUp" : "moveLeft", run: () => movePane(P, k - 1), disabled: k === 0 },
-    { label: vert ? "Move down" : "Move right", icon: vert ? "moveDown" : "moveRight", run: () => movePane(P, k + 2), disabled: k === panes.length - 1 },
-    "-",
-    { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(P) },
-  ]);
+function removeGroup(G) {
+  const k = groups.indexOf(G);
+  if (k < 0) return;
+  groups.splice(k, 1);
+  G.el.remove();
+  G.split?.remove();
+  // The divider before the pane now first isn't needed.
+  layoutPanes();
 }
 
-// Close a PDF (asking to save first). Side by side, its pane goes and the
-// others share the room; the last one stays, empty.
+// Put pane G (all its tabs) before position `to` (groups.length: at the end).
+function movePane(G, to) {
+  if (G && !G.tabs) G = G.group; // a tab: its pane
+  const k = groups.indexOf(G);
+  if (k < 0 || to === k || to === k + 1) return;
+  groups.splice(k, 1);
+  groups.splice(to > k ? to - 1 : to, 0, G);
+  layoutPanes();
+  saveSession();
+}
+
+function tabMenu(P, at) {
+  const G = P.group, k = groups.indexOf(G);
+  const items = [
+    { label: "Close", icon: "x", key: keyOf("view.closePane"), run: () => closePane(P) },
+    { label: "Close the other tabs", icon: "x", run: () => closeTabs(G.tabs.filter((Q) => Q !== P)), disabled: G.tabs.length < 2 },
+    "-",
+    { label: "Move to a new pane side by side", icon: "columns", run: () => { const N = createGroup(k + 1); moveTab(P, N, 0); }, disabled: G.tabs.length < 2 || groups.length >= MAX_PANES },
+    groups.length > 1 && { label: "Move to the next pane", icon: panesEl.classList.contains("vertical") ? "moveDown" : "moveRight", run: () => moveTab(P, groups[(k + 1) % groups.length], groups[(k + 1) % groups.length].tabs.length) },
+    groups.length > 1 && { label: "Move to the previous pane", icon: panesEl.classList.contains("vertical") ? "moveUp" : "moveLeft", run: () => moveTab(P, groups[(k - 1 + groups.length) % groups.length], groups[(k - 1 + groups.length) % groups.length].tabs.length) },
+    "-",
+    P.state.path && { label: "Show in the file list", icon: "folder", run: () => { activate(P); toggleSidebar(true); sidebar.reveal(P.state.path); } },
+  ].filter(Boolean);
+  // no separator at either end or twice in a row
+  showMenu(at, items.filter((it, i, a) => !(it === "-" && (i === 0 || a[i - 1] === "-" || i === a.length - 1))));
+}
+
+function groupMenu(G, anchor) {
+  const k = groups.indexOf(G), vert = panesEl.classList.contains("vertical");
+  if (G.shown) activate(G.shown);
+  showMenu(anchor, [
+    { label: "Open a PDF in a new tab…", icon: "openFile", key: keyOf("file.openFile"), run: async () => { const p = await host.pickFile(); if (p) { if (G.shown) activate(G.shown); openFile(p); } } },
+    { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: groups.length >= MAX_PANES },
+    groups.length > 1 && "-",
+    groups.length > 1 && { label: vert ? "Move this pane up" : "Move this pane left", icon: vert ? "moveUp" : "moveLeft", run: () => movePane(G, k - 1), disabled: k === 0 },
+    groups.length > 1 && { label: vert ? "Move this pane down" : "Move this pane right", icon: vert ? "moveDown" : "moveRight", run: () => movePane(G, k + 2), disabled: k === groups.length - 1 },
+    "-",
+    G.shown?.state.path && { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(G.shown) },
+    G.tabs.length > 1 && { label: groups.length > 1 ? "Close this pane (all its tabs)" : "Close all tabs", icon: "x", run: () => closeTabs(G.tabs.slice()) },
+  ].filter(Boolean));
+}
+
+// Close tabs one after another (each asks first if it has unsaved changes).
+async function closeTabs(list) {
+  for (const P of list) {
+    if (!panes.includes(P)) continue;
+    activate(P);
+    if (!(await confirmDiscard(P))) return;
+    storeView(P);
+    if (panes.length === 1) { closeDocument(P); saveSession(); return; }
+    removePane(P);
+  }
+}
+
+// Close a PDF's tab (asking to save first). The pane shows the next tab; a
+// pane left with none goes and the others share the room; the last tab of
+// all stays, empty.
 async function closePane(P = active) {
   if (!P || !panes.includes(P)) return;
   if (!(await confirmDiscard(P))) return;
@@ -374,17 +628,31 @@ async function closePane(P = active) {
 function removePane(P) {
   const k = panes.indexOf(P);
   if (k < 0) return;
+  const G = P.group, t = G.tabs.indexOf(P), gi = groups.indexOf(G);
   panes.splice(k, 1);
+  G.tabs.splice(t, 1);
+  P.tab.remove();
+  const w = warm.indexOf(P);
+  if (w >= 0) warm.splice(w, 1);
+  clearTimeout(P.sleepTimer);
   P.state.gen++;
   clearTimeout(P.viewTimer);
+  clearTimeout(P.autoTimer);
   P.viewer.destroy();
   P.engine.destroy();
   P.el.remove();
-  P.split?.remove();
-  clearTimeout(P.autoTimer);
-  if (active === P) { active = null; activate(panes[Math.min(k, panes.length - 1)]); }
   pagesPanel.forget(P.id);
   markupsPanel.forget(P.id);
+  let next = null;
+  if (G.shown === P) {
+    G.shown = null;
+    if (G.tabs.length) { next = G.tabs[Math.min(t, G.tabs.length - 1)]; showTab(next); }
+  }
+  if (!G.tabs.length) removeGroup(G);
+  if (active === P) {
+    active = null;
+    activate(next || G.shown || groups[Math.min(gi, groups.length - 1)].shown);
+  }
   layoutPanes();
   saveSession();
 }
@@ -404,7 +672,7 @@ function closeDocument(P) {
   syncActive();
 }
 
-// Open a PDF next to the active one (or in it, if it's empty).
+// Open a PDF in a new pane next to the active one (or in it, if it's empty).
 async function openBeside(path) {
   closePopover();
   path = path || (await host.pickFile());
@@ -412,36 +680,55 @@ async function openBeside(path) {
   const open = panes.find((Q) => samePath(Q.state.path, path));
   if (open) { activate(open); toast(`“${baseName(path)}” is already open`); return; }
   if (!state.path) { openFile(path); return; }
-  if (panes.length >= MAX_PANES) { toast(`Up to ${MAX_PANES} PDFs side by side: close one first (×)`, "error"); return; }
-  const P = createPane(panes.indexOf(active) + 1);
+  if (groups.length >= MAX_PANES) { toast(`Up to ${MAX_PANES} panes side by side: close one first, or open the PDF in a tab`, "error"); return; }
+  if (panes.length >= MAX_TABS) { toast(`Up to ${MAX_TABS} PDFs open at once: close one first (×)`, "error"); return; }
+  const G = createGroup(groups.indexOf(active.group) + 1);
+  const P = createPane(G);
   activate(P);
   await openIn(P, path);
 }
 
+// The next or previous tab (Ctrl+Tab, Ctrl+Shift+Tab), pane after pane.
 function cyclePane(dir) {
-  if (panes.length < 2) return;
-  activate(panes[(panes.indexOf(active) + dir + panes.length) % panes.length]);
+  const all = tabOrder();
+  if (all.length < 2) return;
+  activate(all[(all.indexOf(active) + dir + all.length) % all.length]);
 }
 
-const paneAt = (x, y) => panes.find((Q) => { const r = Q.el.getBoundingClientRect(); return x >= r.left && x < r.right && y >= r.top && y < r.bottom; });
+// Move the active tab one place left or right in its bar.
+function moveTabBy(P, dir) {
+  const G = P.group, k = G.tabs.indexOf(P);
+  if (dir < 0 && k > 0) moveTab(P, G, k - 1);
+  else if (dir > 0 && k < G.tabs.length - 1) moveTab(P, G, k + 2);
+}
 
-// The open PDFs, for the next start.
+const paneAt = (x, y) => shownPanes().find((Q) => { const r = Q.el.getBoundingClientRect(); return x >= r.left && x < r.right && y >= r.top && y < r.bottom; });
+
+// The open PDFs, for the next start: the tabs of each pane, which one was
+// in front, and the room each pane had.
 let restoring = false;
 function saveSession() {
   if (restoring) return;
-  const open = panes.filter((Q) => Q.state.path);
-  cfg.openFiles = open.map((Q) => Q.state.path);
-  cfg.paneWeights = open.map((Q) => Math.round(Q.weight * 1000) / 1000);
+  const gs = groups.map((G) => ({
+    files: G.tabs.map((Q) => Q.state.path || Q.pendingPath).filter(Boolean),
+    shown: G.shown?.state.path || G.shown?.pendingPath || null,
+    weight: Math.round(G.weight * 1000) / 1000,
+  })).filter((g) => g.files.length);
+  cfg.tabs = gs;
+  // What 1.11 and earlier read: the PDF in front of each pane.
+  cfg.openFiles = gs.map((g) => g.shown || g.files[0]);
+  cfg.paneWeights = gs.map((g) => g.weight);
   cfg.activeFile = state?.path || null;
   if (state?.path) cfg.lastFile = state.path;
   saveCfg();
 }
 
 {
-  const first = createPane();
+  const first = createPane(createGroup());
   active = first;
   ({ engine, viewer, state, docHist } = first);
   first.el.classList.add("active");
+  first.group.el.classList.add("active");
 }
 
 // Undo/redo of page changes (delete, add, move...): the whole document as it
@@ -680,7 +967,7 @@ $("#btn-more").onclick = (e) => showMenu(e.currentTarget, [
   { label: "Insert pages from another PDF…", icon: "openFile", key: keyOf("pages.insert"), run: () => insertPagesDialog(null), disabled: !state.path },
   { label: "Merge all PDFs in the folder…", icon: "merge", key: keyOf("file.mergeFolder"), run: () => mergeFolder(), disabled: !cfg.folder },
   "-",
-  { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: panes.length >= MAX_PANES },
+  { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: groups.length >= MAX_PANES },
   (panes.length > 1 || state.path) && { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(active) },
   "-",
   { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(viewer.sel?.text), disabled: !viewer.hasSelection },
@@ -1397,12 +1684,18 @@ async function confirmDiscard(P = active) {
   return r === "discard";
 }
 
-// Open a PDF in the active pane; if it's already open side by side, go to it.
-async function openFile(path, { force = false } = {}) {
+// Open a PDF in a new tab next to the one in use, so that one stays open
+// (in the tab in use if it's empty); if it's open already, go to its tab.
+// `here`: in the tab in use instead (stepping through the file list).
+async function openFile(path, { force = false, here = false } = {}) {
   if (!path) return false;
-  const other = panes.find((Q) => Q !== active && samePath(Q.state.path, path));
+  const other = panes.find((Q) => Q !== active && samePath(Q.state.path || Q.pendingPath, path));
   if (other) { activate(other); if (narrow()) toggleSidebar(false); return true; }
-  return openIn(active, path, { force });
+  if (here || !state.path || samePath(state.path, path)) return openIn(active, path, { force });
+  if (panes.length >= MAX_TABS) { toast(`Up to ${MAX_TABS} PDFs open at once: close a tab first (×)`, "error"); return false; }
+  const G = active.group, P = createPane(G, G.tabs.indexOf(active) + 1);
+  activate(P);
+  return openIn(P, path);
 }
 
 async function openIn(P, path, { force = false } = {}) {
@@ -1411,6 +1704,7 @@ async function openIn(P, path, { force = false } = {}) {
   if (!(await confirmDiscard(P))) return false;
   closePopover();
   storeView(P);
+  P.pendingPath = null;
   const gen = ++state.gen;
   viewer.close();
   engine.close();
@@ -1422,7 +1716,8 @@ async function openIn(P, path, { force = false } = {}) {
     appEl.classList.remove("no-doc");
     updateTitle();
   }
-  const spin = setTimeout(() => appEl.classList.add("loading"), 120);
+  // (no spinner for a tab opening behind the others)
+  const spin = isShown(P) ? setTimeout(() => appEl.classList.add("loading"), 120) : 0;
   try {
     let st = null;
     try { st = await host.stat(path); } catch {}
@@ -1452,7 +1747,7 @@ async function openIn(P, path, { force = false } = {}) {
       $("#zoom-label").textContent = Math.round((viewer.scale * 72 / 96) * 100) + "%";
       findSync();
     } else { pagesPanel.forget(P.id); markupsPanel.forget(P.id); }
-    if (narrow()) toggleSidebar(false);
+    if (narrow() && P === active) toggleSidebar(false);
     saveSession();
     return true;
   } catch (err) {
@@ -1460,7 +1755,7 @@ async function openIn(P, path, { force = false } = {}) {
     state.path = null;
     viewer.close();
     updatePaneHead(P);
-    // Side by side, a PDF that couldn't open doesn't keep an empty pane.
+    // A PDF that couldn't open doesn't keep an empty tab (or pane).
     if (panes.length > 1) {
       if (err.message !== "cancelled") toast(`Couldn't open “${baseName(path)}”: ${err.message}`, "error");
       removePane(P);
@@ -1937,7 +2232,7 @@ function pageHoldMenu(P, h) {
     { label: "Select all markups on this page", key: keyOf("edit.selectMarks"), run: () => selectAllMarks(h.page ?? undefined) },
     v.hasSelection && { label: "Copy selected text", icon: "copy", key: keyOf("edit.copy"), run: () => copyText(v.sel.text) },
     "-",
-    { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: panes.length >= MAX_PANES },
+    { label: "Open a PDF side by side…", icon: "columns", key: keyOf("view.side"), run: () => openBeside(null), disabled: groups.length >= MAX_PANES },
     { label: "Close this PDF", icon: "x", key: keyOf("view.closePane"), run: () => closePane(P) },
   ]);
 }
@@ -2307,7 +2602,7 @@ function fileMenu(at, p, isFile, picks) {
   } else if (isFile) {
     showMenu(at, [
       { label: "Open", run: () => openFile(p) },
-      { label: "Open side by side", icon: "columns", key: keyOf("view.side"), run: () => openBeside(p), disabled: panes.length >= MAX_PANES && !panes.some((Q) => samePath(Q.state.path, p)) },
+      { label: "Open side by side", icon: "columns", key: keyOf("view.side"), run: () => openBeside(p), disabled: groups.length >= MAX_PANES && !panes.some((Q) => samePath(Q.state.path, p)) },
       { label: "Select for merging", icon: "check", run: () => sidebar.startPicking(p) },
       state.path && { label: "Insert into the open PDF…", icon: "filePlus", run: () => insertPagesDialog(p) },
       "-",
@@ -2578,7 +2873,7 @@ function stepFile(dir) {
   if (!files.length) return;
   const k = files.indexOf(state.path);
   const next = files[(k < 0 ? (dir > 0 ? -1 : 0) : k) + dir];
-  if (next) openFile(next);
+  if (next) openFile(next, { here: true });
 }
 
 // ------------------------------------------------------------------ page pill
@@ -2736,11 +3031,13 @@ const COMMANDS = [
   { id: "view.actual", group: "View", label: "Actual size (100%)", keys: ["Ctrl+1"], run: () => nv().setZoom(96 / 72) },
   { id: "view.fullscreen", group: "View", label: "Full screen", keys: ["F11"], typing: true, run: () => host.toggleFullscreen() },
   { id: "view.side", group: "View", label: "Open a PDF side by side…", keys: ["Ctrl+Shift+O"], typing: true, run: () => openBeside(null) },
-  { id: "view.closePane", group: "View", label: "Close this PDF", keys: ["Ctrl+W"], typing: true, when: () => !!state.path || panes.length > 1, run: () => closePane(active) },
-  { id: "view.nextPane", group: "View", label: "Go to the next PDF side by side", keys: ["Ctrl+Tab"], typing: true, when: () => panes.length > 1, run: () => cyclePane(1) },
-  { id: "view.prevPane", group: "View", label: "Go to the previous PDF side by side", keys: ["Ctrl+Shift+Tab"], typing: true, when: () => panes.length > 1, run: () => cyclePane(-1) },
-  { id: "view.paneBack", group: "View", label: "Move this PDF left (or up)", keys: [], when: () => panes.indexOf(active) > 0, run: () => movePane(active, panes.indexOf(active) - 1) },
-  { id: "view.paneForward", group: "View", label: "Move this PDF right (or down)", keys: [], when: () => panes.indexOf(active) < panes.length - 1, run: () => movePane(active, panes.indexOf(active) + 2) },
+  { id: "view.closePane", group: "View", label: "Close this PDF (its tab)", keys: ["Ctrl+W"], typing: true, when: () => !!state.path || panes.length > 1, run: () => closePane(active) },
+  { id: "view.nextPane", group: "View", label: "Go to the next tab", keys: ["Ctrl+Tab"], typing: true, when: () => panes.length > 1, run: () => cyclePane(1) },
+  { id: "view.prevPane", group: "View", label: "Go to the previous tab", keys: ["Ctrl+Shift+Tab"], typing: true, when: () => panes.length > 1, run: () => cyclePane(-1) },
+  { id: "view.tabBack", group: "View", label: "Move this tab left", keys: ["Ctrl+Shift+PageUp"], when: () => active.group.tabs.indexOf(active) > 0, run: () => moveTabBy(active, -1) },
+  { id: "view.tabForward", group: "View", label: "Move this tab right", keys: ["Ctrl+Shift+PageDown"], when: () => active.group.tabs.indexOf(active) < active.group.tabs.length - 1, run: () => moveTabBy(active, 1) },
+  { id: "view.paneBack", group: "View", label: "Move this pane left (or up)", keys: [], when: () => groups.indexOf(active.group) > 0, run: () => movePane(active.group, groups.indexOf(active.group) - 1) },
+  { id: "view.paneForward", group: "View", label: "Move this pane right (or down)", keys: [], when: () => groups.indexOf(active.group) < groups.length - 1, run: () => movePane(active.group, groups.indexOf(active.group) + 2) },
   { id: "view.ribbon", group: "View", label: "Customize the toolbar…", keys: [], typing: true, run: () => ribbonDialog() },
   { id: "view.wheel", group: "View", label: "Switch the mouse wheel between scroll and zoom", keys: [], run: () => setWheel(cfg.wheel === "zoom" ? "scroll" : "zoom") },
   // Navigate
@@ -2983,34 +3280,64 @@ if (host.platform === "web" && new URLSearchParams(location.search).get("folder"
 if (cfg.folder) loadFolder(cfg.folder, true);
 else { sidebar.setRoot(null); sidebar.setTree(null); }
 
-// The PDFs that were open side by side last time, or the one Windows asked
-// to open. (1.7 kept a second, read-only PDF on the side: it opens as an
-// ordinary one now.)
+// The PDFs that were open last time (the tabs of each pane side by side),
+// or the one Windows asked to open. The tab in front of each pane opens
+// first; the others open behind it, one after another, asleep. (1.7 kept a
+// second, read-only PDF on the side: it opens as an ordinary one now.)
 {
   restoring = true;
-  let list;
-  if (host.initialFile) list = [host.initialFile];
-  else if (Array.isArray(cfg.openFiles)) list = cfg.openFiles;
-  else list = [cfg.lastFile, cfg.sidePath];
-  const weights = !host.initialFile && Array.isArray(cfg.paneWeights) ? cfg.paneWeights : [];
+  let layout;
+  if (Array.isArray(cfg.tabs) && cfg.tabs.length) layout = cfg.tabs.map((g) => ({ ...g, files: Array.isArray(g?.files) ? g.files.slice() : [] }));
+  else if (Array.isArray(cfg.openFiles)) layout = cfg.openFiles.map((p, k) => ({ files: [p], shown: p, weight: cfg.paneWeights?.[k] }));
+  else layout = [cfg.lastFile, cfg.sidePath].filter(Boolean).map((p) => ({ files: [p], shown: p }));
+  // A PDF Windows asked to open (double-clicked in File Explorer): in front,
+  // in its tab if it was open, else in a new tab after the one in front.
+  if (host.initialFile) {
+    const f = host.initialFile;
+    const g = layout.find((x) => x.files.some((y) => samePath(y, f)));
+    if (g) g.shown = g.files.find((y) => samePath(y, f));
+    else if (layout.length) { const g0 = layout[0], k = g0.files.findIndex((y) => samePath(y, g0.shown)); g0.files.splice(k + 1, 0, f); g0.shown = f; }
+    else layout = [{ files: [f], shown: f }];
+    cfg.activeFile = f;
+  }
   delete cfg.sidePath;
   delete cfg.sideFrac;
-  const files = [];
-  for (const p of list.filter(Boolean)) {
-    if (files.length >= MAX_PANES || files.some((f) => samePath(f, p))) continue;
-    const st = await host.stat(p).catch(() => null);
-    if (st && !st.isDirectory) files.push(p);
+  // Files still there, each once; at most MAX_PANES panes and MAX_TABS tabs.
+  const seen = [], plan = [];
+  for (const g of layout.slice(0, MAX_PANES)) {
+    const files = [];
+    for (const p of (Array.isArray(g?.files) ? g.files : []).filter((f) => typeof f === "string" && f)) {
+      if (seen.length >= MAX_TABS || seen.some((f) => samePath(f, p))) continue;
+      const st = await host.stat(p).catch(() => null);
+      if (st && !st.isDirectory) { files.push(p); seen.push(p); }
+    }
+    if (files.length) plan.push({ files, shown: files.find((f) => samePath(f, g.shown)) || files[0], weight: g.weight > 0 ? g.weight : 1 });
   }
-  const jobs = files.map((p, k) => {
-    const P = k ? createPane() : panes[0];
-    P.weight = weights[k] > 0 ? weights[k] : 1;
-    return [P, p];
+  const front = [], behind = [];
+  plan.forEach((g, gi) => {
+    const G = gi === 0 ? panes[0].group : createGroup();
+    G.weight = g.weight;
+    // the tab in front first (the empty first tab is it, in the first pane)
+    const S = gi === 0 ? panes[0] : createPane(G, 0, { show: true });
+    front.push([S, g.shown]);
+    g.files.forEach((p, k) => {
+      if (p === g.shown) return;
+      const P = createPane(G, k, { show: false });
+      P.pendingPath = p;
+      updatePaneHead(P);
+      behind.push([P, p]);
+    });
   });
   layoutPanes();
-  const ai = files.findIndex((p) => samePath(p, cfg.activeFile));
-  if (ai > 0) activate(panes[ai]);
-  Promise.all(jobs.map(([P, p]) => openIn(P, p))).finally(() => { restoring = false; saveSession(); });
-  if (!files.length) {
+  const want = panes.find((P) => samePath(front.find(([S]) => S === P)?.[1], cfg.activeFile));
+  if (want) activate(want);
+  else if (plan.length) activate(front[0][0]);
+  Promise.all(front.map(([P, p]) => openIn(P, p))).then(async () => {
+    restoring = false;
+    saveSession();
+    for (const [P, p] of behind) if (panes.includes(P) && P.pendingPath === p) await openIn(P, p);
+  }).finally(() => { restoring = false; saveSession(); });
+  if (!plan.length) {
     restoring = false;
     $("#empty-msg").textContent = cfg.folder ? "Pick a PDF from the list on the left." : "Open a folder to see every PDF inside it, including subfolders.";
   }
@@ -3025,7 +3352,7 @@ if (canUpdate && cfg.autoUpdate !== false) {
 // Expose for automated tests.
 window.__inkleaf = {
   get viewer() { return viewer; }, get engine() { return engine; }, get state() { return state; }, get active() { return active; },
-  panes, activate, openBeside, closePane, movePane, cyclePane, paste, copyMarks, duplicateMarks, selectAllMarks, setAutosave,
+  panes, groups, get visible() { return shownPanes(); }, activate, openBeside, closePane, closeTabs, movePane, moveTab, moveTabBy, cyclePane, createGroup, sleepTab, paste, copyMarks, duplicateMarks, selectAllMarks, setAutosave,
   pagesPanel, setPanelWidth, checkForUpdates, updateDialog, get updateInfo() { return updateInfo; },
   markupsPanel, openFind, closeFind, findStep, applyRibbon, ribbonDialog, fitToolbar, showPanel, get find() { return active?.find; },
   sidebar, cfg, openFile, save, scaleFor, setScale, copyText, prepareSignature, openSignPanel, sigs: () => sigLib,

@@ -609,23 +609,37 @@ select {
 /* ---------- open PDFs, side by side ---------- */
 #panes { position: absolute; inset: 0; display: flex; }
 #panes.vertical { flex-direction: column; }
+/* a pane side by side: its tab bar, and the open PDFs stacked, the tab in front shown */
+.group { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+.group-stack { position: relative; flex: 1; min-height: 0; }
+.group-stack > .pane { position: absolute; inset: 0; }
 .pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.pane:not(.shown) { visibility: hidden; pointer-events: none; }
 .pane-view { position: relative; flex: 1; min-height: 0; }
-.pane-head { display: none; }
-#panes.multi .pane-head {
-  display: flex; align-items: center; gap: 2px; flex: none; height: 42px; padding: 0 4px 0 4px;
-  background: var(--panel); border-bottom: 1px solid var(--border); touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none;
-}
-#panes.multi .pane.active .pane-head { box-shadow: inset 0 3px 0 var(--accent); }
-.pane-grip { display: flex; align-items: center; justify-content: center; width: 22px; height: 32px; color: var(--muted); flex: none; }
-.pane-grip .icon { width: 16px; height: 16px; }
-.pane-name { font-weight: 600; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pane.active .pane-name { color: var(--accent); }
-.pane-dot { display: none; flex: none; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--accent); }
-.pane.dirty .pane-dot { display: block; }
-.pane-page { flex: 1; min-width: 0; margin-left: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.pane-head .icon-btn { width: 34px; min-width: 0; height: 34px; flex: none; }
-.pane.moving { opacity: 0.55; }
+.tabbar { flex: none; display: flex; align-items: stretch; height: 40px; padding: 0 4px 0 6px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.no-doc .tabbar { display: none; }
+.tabs { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-end; gap: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { position: relative; flex: 0 1 210px; min-width: 84px; height: 35px; display: flex; align-items: center; gap: 2px; padding: 0 3px 0 12px; border-radius: 9px 9px 0 0; color: var(--muted); cursor: default; touch-action: pan-x; user-select: none; -webkit-user-select: none; container-type: inline-size; }
+.tab:hover { background: var(--hover); color: var(--text); }
+.tab.on { background: var(--stage); color: var(--text); }
+.group.active .tab.on { box-shadow: inset 0 3px 0 var(--accent); }
+.group.active .tab.on .tab-name { color: var(--accent); }
+.tab + .tab:not(.on)::before { content: ""; position: absolute; left: -2px; top: 9px; bottom: 9px; width: 1px; background: var(--border); }
+.tab.on + .tab::before, .tab:hover + .tab::before { display: none; }
+.tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.pane-dot { display: none; flex: none; width: 7px; height: 7px; margin: 0 3px; border-radius: 50%; background: var(--accent); }
+.tab.dirty .pane-dot { display: block; }
+.tab-x { flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 7px; background: none; color: inherit; display: flex; align-items: center; justify-content: center; }
+.tab-x .icon { width: 15px; height: 15px; }
+.tab-x:hover { background: var(--press); }
+@container (max-width: 120px) { .tab:not(.on) .tab-x { display: none; } }
+.tab.moving { opacity: 0.45; }
+.tab.held { background: var(--accent-soft); color: var(--text); }
+.tabbar .pane-page { flex: 0 1 auto; max-width: 34%; align-self: center; margin: 0 4px 0 8px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+@container (max-width: 520px) { .tabbar .pane-page { display: none; } }
+.tabbar .icon-btn { align-self: center; width: 34px; min-width: 0; height: 34px; flex: none; }
+.group.tab-drop-target .group-stack::after { content: "Move the tab here"; position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--accent); border: 3px dashed var(--accent); background: var(--accent-soft); opacity: 0.92; pointer-events: none; }
 .pane-split { flex: none; width: 10px; margin: 0 -2px; position: relative; z-index: 5; cursor: col-resize; touch-action: none; background: var(--border); background-clip: content-box; padding: 0 4px; }
 .pane-split::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 44px; margin: -22px 0 0 -2px; border-radius: 2px; background: var(--muted); opacity: 0.55; }
 .pane-split.active::after, .pane-split:hover::after { opacity: 1; background: var(--accent); }
@@ -634,6 +648,7 @@ select {
 .pane-ghost { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; padding: 8px 14px; border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); font-weight: 600; font-size: 13px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pane-drop { position: fixed; z-index: 49; width: 4px; border-radius: 2px; background: var(--accent); pointer-events: none; }
 .pane-drop.v { width: auto; height: 4px; }
+.pane-drop.zone { width: auto; border-radius: 10px; border: 3px dashed var(--accent); background: var(--accent-soft); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--accent); }
 .pane.drop-target::after { content: "Copy the pages here"; position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--accent); border: 3px dashed var(--accent); background: var(--accent-soft); opacity: 0.92; pointer-events: none; }
 
 /* ---------- markups list and search results (right panel) ---------- */
@@ -659,7 +674,6 @@ select {
 /* ---------- search bar (top right of the PDF in use) ---------- */
 #findbar { position: absolute; top: 10px; right: 18px; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 4px 4px 4px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
 #findbar[hidden] { display: none; }
-#panes.multi #findbar { top: 52px; }
 #find-q { width: min(220px, 40vw); border: 0; outline: 0; font: inherit; font-size: 14px; background: transparent; color: inherit; padding: 6px 4px; }
 #find-n { font-size: 12px; color: var(--muted); white-space: nowrap; min-width: 54px; text-align: right; padding-right: 4px; font-variant-numeric: tabular-nums; }
 #findbar.none #find-n { color: var(--danger); }

@@ -10,7 +10,7 @@ Then extract the zip and double-click **Install Eagles PDF viewer** ([step by st
 
 ![Eagles PDF viewer measuring a services layout drawing at 1:100](docs/screenshot.jpg)
 
-**Current version: 1.11.1** · Windows 10 or 11, 64-bit
+**Current version: 1.12.0** · Windows 10 or 11, 64-bit
 
 - [Install](#install)
 - [Getting started](#getting-started)
@@ -74,11 +74,23 @@ Go to **Settings**, then **Apps**, then **Installed apps**. Click **⋯** next t
   - Every PDF in that folder and all its subfolders appears in the list on the left.
   - The list updates by itself when files are added or removed.
 - Type in **Filter PDFs** (**Ctrl+F**) to find a file by name.
-- Click or tap a file to open it. **Alt+↓** and **Alt+↑** move to the next and previous PDF in the list.
+- Click or tap a file to open it. It opens in a new **tab**, so the PDF you had open stays open (see below). **Alt+↓** and **Alt+↑** step to the next and previous PDF in the list in the same tab.
 - You can also drag a PDF or a folder onto the window, use **⋯ → Open file…**, or open PDFs from File Explorer once it's your default app.
 - Right-click a file in the list for **Show in folder** and **Copy path**.
 - Drag the list's edge to resize it, or hide it with the button at the top left (**Ctrl+B**).
-- The app remembers where you were in each file and reopens the last one when it starts.
+- The app remembers where you were in each file and reopens the PDFs you had open when it starts.
+
+#### Tabs: several PDFs open, one tap apart
+
+Every PDF you open gets a tab along the top, like in a web browser. Opening another PDF never closes the one you were working on.
+
+- **Switch:** tap or click a tab, or press **Ctrl+Tab** / **Ctrl+Shift+Tab**. Each tab keeps its own page, zoom, undo history and unsaved changes; a blue dot on a tab means it has changes that aren't saved yet.
+- **Open the same PDF again:** the app goes to its tab instead of opening it twice.
+- **Close a tab:** its **×**, **Ctrl+W**, or a middle-click. You're asked first if it has unsaved changes.
+- **Reorder:** drag a tab along the bar with the mouse or pen. With a finger, press and hold it for a moment, or pull it down out of the bar, then drag. A quick swipe along the bar scrolls it when there are many tabs.
+- **Tab menu:** right-click a tab, or press and hold it without moving: **Close**, **Close the other tabs**, **Move to a new pane side by side**, **Move to the next / previous pane**, **Show in the file list**.
+- Up to 20 PDFs can be open at once. Tabs you haven't looked at for a while go to sleep to save memory (the PDF and its changes stay); one comes back in a moment when you tap it, then sharpens.
+- When you start the app again, the same tabs open, with the same one in front. The one in front opens first; the others open behind it.
 
 ### 2. Move around
 
@@ -246,16 +258,17 @@ Pictures copied in other apps (screenshots, photos) paste too, at their normal o
 
 ### 10. Side by side: several PDFs at once
 
-- **Open:** right-click a PDF in the file list (with a finger: press and hold) → **Open side by side**. You can also use **⋯ → Open a PDF side by side…**, press and hold a page → **Open a PDF side by side…**, or **Ctrl+Shift+O**. Up to four PDFs can be open at once.
-- **They all work the same.** Write, highlight, draw, sign, measure, snip, edit pages, undo and save in any of them: there's no "main" one. The one you touched last is the one in use. Its title bar has a blue line, and the toolbar, the keyboard, the page counter and the Pages panel all follow it.
+- **Open:** right-click a PDF in the file list (with a finger: press and hold) → **Open side by side**. You can also use **⋯ → Open a PDF side by side…**, press and hold a page → **Open a PDF side by side…**, or **Ctrl+Shift+O**. Up to four panes can be side by side.
+- **Each pane has its own tabs.** Opening a PDF from the file list adds a tab to the pane in use. Drag a tab onto another pane's tab bar (or onto its page) to move it there.
+- **They all work the same.** Write, highlight, draw, sign, measure, snip, edit pages, undo and save in any of them: there's no "main" one. The one you touched last is the one in use. Its tab has a blue line, and the toolbar, the keyboard, the page counter and the Pages panel all follow it.
 - **Move around** in each PDF on its own, just like with one: drag with a finger, pinch to zoom, double-tap, scroll.
-- **Move a PDF:** drag its title bar (with a finger, the pen or the mouse) to another place; a blue line shows where it will go. Or use **⋯** on its title bar → **Move left / Move right**.
+- **Move a PDF to its own pane, or a pane elsewhere:** drag its tab to the left or right edge of a pane (top or bottom when they're stacked): *New pane here* shows where it will go. Or use the tab's menu → **Move to a new pane side by side**, or **⋯** on a tab bar → **Move this pane left / right**.
 - **Resize:** drag the bar between two PDFs.
-- **Close one:** the **×** on its title bar (or **Ctrl+W** for the one in use). You're asked first if it has unsaved changes. The others share out the room.
+- **Close one:** the **×** on its tab (or **Ctrl+W** for the one in use). You're asked first if it has unsaved changes. A pane whose last tab closes goes, and the others share out the room. **⋯** on a tab bar → **Close this pane** closes all its tabs.
 - **Copy from one to another:** snip in one PDF and tap where it should go in another; or drag pages from the Pages panel onto another PDF.
-- **Switch:** tap a PDF, or **Ctrl+Tab** / **Ctrl+Shift+Tab**.
+- **Switch:** tap a PDF or a tab, or **Ctrl+Tab** / **Ctrl+Shift+Tab** (through every tab, pane by pane).
 
-They sit next to each other, or one above the other when the window is taller than it is wide (a tablet held upright). Clicking a PDF in the file list opens it in the PDF in use (or goes to it if it's already open). Your palm is ignored on every PDF while the pen is writing in one of them. When you start the app again, the same PDFs open side by side, in the same order and sizes.
+They sit next to each other, or one above the other when the window is taller than it is wide (a tablet held upright). Your palm is ignored on every PDF while the pen is writing in one of them. When you start the app again, the same panes open with the same tabs, in the same order and sizes.
 
 ### 11. Lasso: select several markups
 
@@ -376,7 +389,8 @@ The defaults:
 | Ctrl+Shift+M | Show/hide the markups list |
 | Ctrl+Shift+P · Delete (in the panel) | Show/hide the Pages panel · delete the selected pages |
 | Ctrl + mouse wheel (over the Pages panel) | Bigger or smaller pages in the panel |
-| Ctrl+Shift+O · Ctrl+W · Ctrl+Tab / Ctrl+Shift+Tab | Open a PDF side by side · close the PDF in use · go to the next / previous PDF side by side |
+| Ctrl+Shift+O · Ctrl+W · Ctrl+Tab / Ctrl+Shift+Tab | Open a PDF side by side · close the PDF in use (its tab) · go to the next / previous tab |
+| Ctrl+Shift+PageUp / PageDown | Move the tab in use left / right |
 | F11 · F1 · Ctrl+K | Full screen · help · keyboard shortcuts |
 
 These keys always do the same thing in their situation:

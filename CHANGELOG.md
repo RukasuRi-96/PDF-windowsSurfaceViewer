@@ -2,6 +2,13 @@
 
 The first lines under each version are shown in the app's update window.
 
+## 1.12.0
+
+- Tabs: opening a PDF adds a tab, so the one you were working on stays open. Tap a tab (or Ctrl+Tab) to switch; each keeps its page, zoom, undo and unsaved changes.
+- Close a tab with its ×, Ctrl+W or a middle-click; drag tabs to reorder them (with a finger: hold a moment, or pull the tab down); right-click or hold a tab for its menu.
+- Side by side, each pane has its own tabs: drag a tab onto another pane to move it there, or to a pane's edge for a new pane on that side.
+- Tabs out of view sleep to save memory, and the same tabs open again when you start the app.
+
 ## 1.11.1
 
 - Updates install again: after Restart now, the app closes only once its installer helper is running, and reopens on the new version. (1.10.x downloaded updates but couldn't install them; install this version once with the installer.)

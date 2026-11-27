@@ -36,11 +36,18 @@ class WorkerClient {
   }
 }
 
+// A PDF in a tab that isn't shown sleeps: its render workers are stopped
+// (each holds a copy of the PDF) and started again when the tab is shown.
+// The edit worker, which holds the document and its unsaved changes, stays.
 export class Engine {
-  constructor(workerUrl, renderCount) {
+  constructor(workerUrl, renderCount, { sleeping = false } = {}) {
+    this.url = workerUrl;
     this.edit = new WorkerClient(workerUrl);
     this.renderers = [];
-    for (let i = 0; i < renderCount; i++) this.renderers.push(new WorkerClient(workerUrl));
+    this.want = renderCount;
+    this.sleeping = sleeping;
+    if (!sleeping) this._spawn();
+    this.src = null;        // what renderers open: { url, password, size } or { edit: true } (the edit worker's bytes)
     this.queue = [];
     this.inFlight = new Map(); // key -> task
     this.gen = 0;
@@ -57,6 +64,76 @@ export class Engine {
     await Promise.all([this.edit.ready, ...this.renderers.map((r) => r.ready)]);
   }
 
+  _spawn() {
+    for (let i = this.renderers.length; i < this.want; i++) this.renderers.push(new WorkerClient(this.url));
+  }
+  // Render workers for a file of this size: big files get fewer, so memory
+  // isn't multiplied.
+  _countFor(sizeBytes) {
+    let n = this.renderers.length;
+    if (sizeBytes > 150e6) n = 1;
+    else if (sizeBytes > 60e6) n = Math.min(n, 2);
+    return n;
+  }
+  // Open the document in renderers[0..n), from this.src.
+  _openRenderers(n) {
+    const gen = this.gen;
+    this.rendererCount = n;
+    this.activeRenderers = [];
+    const src = this.src;
+    const bytesP = src && src.edit ? this.edit.call("sourceBytes") : null;
+    const opens = this.renderers.slice(0, n).map(async (r) => {
+      r.docOpen = false;
+      let ri;
+      try {
+        if (bytesP) {
+          const b = await bytesP;
+          if (gen !== this.gen || !b) return;
+          const copy = b.slice();
+          ri = await r.call("open", { bytes: copy, password: this.password }, [copy.buffer]);
+        } else {
+          ri = await r.call("open", { url: src.url, password: src.password });
+        }
+      } catch (err) {
+        if (err.message === "closed") return; // the tab went to sleep meanwhile
+        throw err;
+      }
+      if (gen !== this.gen || !this.renderers.includes(r)) return;
+      if (!ri.needsPassword) {
+        r.docOpen = true;
+        this.activeRenderers.push(r);
+        this._pump();
+      }
+    });
+    for (const r of this.renderers.slice(n)) { r.docOpen = false; r.call("close"); }
+    return opens;
+  }
+
+  // Stop the render workers (the tab isn't shown). Tiles still being drawn
+  // are dropped; the document and its changes stay in the edit worker.
+  sleep() {
+    if (this.sleeping) return;
+    this.sleeping = true;
+    this.queue = [];
+    this.thumbQueue = [];
+    this.activeRenderers = [];
+    for (const r of this.renderers) {
+      try { r.worker.terminate(); } catch {}
+      for (const p of r.pending.values()) p.reject(new Error("closed"));
+      r.pending.clear();
+    }
+    this.renderers = [];
+  }
+
+  // Start them again (`n` of them) and open the document in them.
+  wake(n) {
+    if (!this.sleeping) return;
+    this.sleeping = false;
+    if (n) this.want = n;
+    this._spawn();
+    if (this.src) this._openRenderers(this._countFor(this.src.size || 0));
+  }
+
   setAuthor(name) {
     this.edit.call("setAuthor", { name });
   }
@@ -69,25 +146,11 @@ export class Engine {
     const info = await this.edit.call("open", { url, password });
     if (info.needsPassword) return info;
     this.password = password || null;
-    // Big files: fewer render workers so we don't multiply memory use.
-    let n = this.renderers.length;
-    if (sizeBytes > 150e6) n = 1;
-    else if (sizeBytes > 60e6) n = Math.min(n, 2);
-    this.rendererCount = n;
-    this.activeRenderers = [];
-    const opens = this.renderers.slice(0, n).map(async (r) => {
-      r.docOpen = false;
-      const ri = await r.call("open", { url, password });
-      if (gen !== this.gen) return;
-      if (!ri.needsPassword) {
-        r.docOpen = true;
-        this.activeRenderers.push(r);
-        this._pump();
-      }
-    });
-    for (const r of this.renderers.slice(n)) { r.docOpen = false; r.call("close"); }
-    // Don't wait for every renderer; the first one is enough to start drawing.
-    await Promise.race(opens);
+    this.src = { url, password, size: sizeBytes || 0 };
+    const opens = this._openRenderers(this._countFor(sizeBytes || 0));
+    // Don't wait for every renderer; the first one is enough to start drawing
+    // (none while the tab sleeps).
+    if (opens.length) await Promise.race(opens);
     const pages = [];
     const b = info.bounds;
     for (let i = 0; i < info.pageCount; i++) {
@@ -121,6 +184,8 @@ export class Engine {
     this.thumbQueue = [];
     const gen = this.gen;
     this.activeRenderers = [];
+    // From now on renderers open what the edit worker has.
+    this.src = { edit: true, size: r.bytes.length };
     for (const rd of this.renderers.slice(0, this.rendererCount)) {
       rd.docOpen = false;
       const copy = r.bytes.slice();
@@ -158,6 +223,7 @@ export class Engine {
 
   close() {
     this.gen++;
+    this.src = null;
     this.queue = [];
     this.thumbQueue = [];
     this.editChain = Promise.resolve();
@@ -187,7 +253,7 @@ export class Engine {
           else out.bitmap.close();
         })
         .catch((err) => {
-          if (gen === this.gen) console.warn("render failed", task.key, err);
+          if (gen === this.gen && err.message !== "closed") console.warn("render failed", task.key, err);
         })
         .finally(() => {
           r.busy = false;

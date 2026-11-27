@@ -1149,6 +1149,13 @@ const handlers = {
     return { result: true };
   },
   setAuthor({ name }) { author = name || ""; return { result: true }; },
+  // The bytes the document was opened from (after page changes: the changed
+  // document), for render workers started again when a tab is shown.
+  sourceBytes() {
+    if (!fileBytes?.data) return { result: null };
+    const out = fileBytes.data.slice();
+    return { result: out, transfer: [out.buffer] };
+  },
   // Change pages (see pageOp); returns the new bytes and page sizes, and the
   // document as it was before, for undo.
   async pages({ op }) {

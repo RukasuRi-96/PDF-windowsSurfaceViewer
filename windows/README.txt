@@ -155,16 +155,26 @@ TOOLBAR: More (...) > Customize the toolbar (or right-click it)
   Tick the buttons to show. With many, the buttons get smaller so all
   fit. Hidden ones stay in the More (...) menu and on their keys.
 
-SIDE BY SIDE: UP TO FOUR PDFS AT ONCE
-  Right-click a PDF in the file list (with a finger: press and hold)
-  > "Open side by side", or press Ctrl+Shift+O.
-  Every PDF works the same: write, draw, sign, snip, change pages, undo
-  and save in any of them. The one you touched last is the one in use
-  (blue line on its title bar); the toolbar, keys and Pages panel
-  follow it. Drag a title bar to move that PDF; drag the bar between
-  two PDFs to resize them; X on a title bar (or Ctrl+W) closes it.
-  Ctrl+Tab goes to the next one. In portrait they stack. The same PDFs
+TABS: SEVERAL PDFS OPEN AT ONCE
+  Opening a PDF adds a tab along the top; the PDF you had open stays
+  open. Tap a tab (or Ctrl+Tab / Ctrl+Shift+Tab) to switch. Each tab
+  keeps its page, zoom, undo and unsaved changes (blue dot). X on a tab,
+  Ctrl+W or a middle-click closes it (asking first about unsaved
+  changes). Drag a tab to reorder it (with a finger: hold it a moment,
+  or pull it down, then drag). Right-click or hold a tab for its menu.
+  Up to 20 tabs; tabs out of view sleep to save memory. The same tabs
   open again next time.
+
+SIDE BY SIDE: UP TO FOUR PANES AT ONCE
+  Right-click a PDF in the file list (with a finger: press and hold)
+  > "Open side by side", or press Ctrl+Shift+O. Each pane has its own
+  tabs. Every PDF works the same: write, draw, sign, snip, change pages,
+  undo and save in any of them. The one you touched last is the one in
+  use (blue line on its tab); the toolbar, keys and Pages panel follow
+  it. Drag a tab onto another pane to move it there, or to the edge of
+  a pane for a new pane on that side; drag the bar between two panes to
+  resize them. In portrait they stack. The same panes open again next
+  time.
 
 MERGE PDFS
   In the file list, Ctrl+click the PDFs you want (Shift+click for a

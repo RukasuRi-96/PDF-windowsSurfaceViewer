@@ -145,10 +145,19 @@ const MM = 72 / 25.4;
   if (!(await p2.isVisible('.sb-row:has-text("B2 services layout")'))) await p2.click('#btn-sidebar');
   await p2.click('.sb-row:has-text("B2 services layout")', { button: 'right' });
   await p2.click('.menu button:has-text("Open side by side")');
-  await p2.waitForFunction(() => window.__inkleaf.panes.length === 2 && window.__inkleaf.panes[1].view.querySelector('.page.ready'), null, { timeout: 15000 });
-  console.log('side by side:', await p2.textContent('.pane.active .pane-name'), '·', await p2.evaluate(() => window.__inkleaf.panes.every(P => P.el.getBoundingClientRect().width > 200)), '· in use:', await p2.evaluate(() => window.__inkleaf.state.path.split(/[\\/]/).pop()));
-  await p2.click('.pane.active [data-act=close]');
-  await p2.waitForFunction(() => window.__inkleaf.panes.length === 1);
+  await p2.waitForFunction(() => window.__inkleaf.groups.length === 2 && window.__inkleaf.visible[1].view.querySelector('.page.ready'), null, { timeout: 15000 });
+  console.log('side by side:', await p2.textContent('.group.active .tab.on .tab-name'), '·', await p2.evaluate(() => window.__inkleaf.visible.every(P => P.el.getBoundingClientRect().width > 200)), '· in use:', await p2.evaluate(() => window.__inkleaf.state.path.split(/[\\/]/).pop()));
+  await p2.click('.group.active .tab.on .tab-x');
+  await p2.waitForFunction(() => window.__inkleaf.groups.length === 1);
+  // A PDF opened over another opens in a tab: both stay open (and the two
+  // opened earlier came back as tabs after the relaunch).
+  const tabsBefore = await p2.evaluate(() => window.__inkleaf.groups[0].tabs.map(P => P.state.path.split(/[\\/]/).pop()));
+  await p2.click('.sb-row:has-text("B2 services layout")');
+  await p2.waitForFunction(() => window.__inkleaf.state.path?.endsWith('B2 services layout.pdf') && window.__inkleaf.viewer.doc?.states.get(0)?.base, null, { timeout: 15000 });
+  const tabsAfter = await p2.evaluate(() => window.__inkleaf.groups[0].tabs.map(P => P.state.path.split(/[\\/]/).pop()));
+  console.log('tabs after the relaunch:', JSON.stringify(tabsBefore), '· opening another adds a tab:', JSON.stringify(tabsAfter));
+  await p2.keyboard.press('Control+w');
+  await p2.waitForFunction((n) => window.__inkleaf.panes.length === n - 1, tabsAfter.length);
   // Updates: found a few seconds after start, the ⋯ menu offers it, downloaded
   // and checked, then "When I close the app".
   await p2.waitForFunction(() => window.__inkleaf.updateInfo?.latest === '9.9.9', null, { timeout: 20000 });

@@ -1,13 +1,23 @@
 {
-  "version": "1.11.1",
+  "version": "1.12.0",
   "electron": "44.9.3",
-  "date": "2026-11-24",
+  "date": "2026-11-27",
   "notes": [
-    "Updates install again: after Restart now, the app closes only once its installer helper is running, and reopens on the new version. (1.10.x downloaded updates but couldn't install them; install this version once with the installer.)",
-    "If an update ever can't install itself, the next start says so, shows what happened and offers the installer; after one that worked, a message says so.",
-    "The tick box in the update window is the right size again."
+    "Tabs: opening a PDF adds a tab, so the one you were working on stays open. Tap a tab (or Ctrl+Tab) to switch; each keeps its page, zoom, undo and unsaved changes.",
+    "Close a tab with its ×, Ctrl+W or a middle-click; drag tabs to reorder them (with a finger: hold a moment, or pull the tab down); right-click or hold a tab for its menu.",
+    "Side by side, each pane has its own tabs: drag a tab onto another pane to move it there, or to a pane's edge for a new pane on that side.",
+    "Tabs out of view sleep to save memory, and the same tabs open again when you start the app."
   ],
   "changes": [
+    {
+      "version": "1.12.0",
+      "notes": [
+        "Tabs: opening a PDF adds a tab, so the one you were working on stays open. Tap a tab (or Ctrl+Tab) to switch; each keeps its page, zoom, undo and unsaved changes.",
+        "Close a tab with its ×, Ctrl+W or a middle-click; drag tabs to reorder them (with a finger: hold a moment, or pull the tab down); right-click or hold a tab for its menu.",
+        "Side by side, each pane has its own tabs: drag a tab onto another pane to move it there, or to a pane's edge for a new pane on that side.",
+        "Tabs out of view sleep to save memory, and the same tabs open again when you start the app."
+      ]
+    },
     {
       "version": "1.11.1",
       "notes": [
@@ -79,18 +89,11 @@
         "Page names (labels and bookmarks) in the Pages panel and the page counter.",
         "Press and hold a page in the Pages panel to move it."
       ]
-    },
-    {
-      "version": "1.6.0",
-      "notes": [
-        "Merge PDFs, or every PDF in a folder.",
-        "The Pages panel: delete, add, copy in, duplicate, move and rotate pages."
-      ]
     }
   ],
   "setup": {
-    "url": "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewer/main/downloads/updates/EaglesPDF-Setup-1.11.1.zip",
-    "sha256": "a34959b364875235118512f605f4102bd770688de522741eb26f6fa08e7c5f07",
-    "size": 5150839
+    "url": "https://raw.githubusercontent.com/RukasuRi-96/PDF-windowsSurfaceViewer/main/downloads/updates/EaglesPDF-Setup-1.12.0.zip",
+    "sha256": "5ddc973752961f20b999640b1fa096a01fc292a6020c3c67fdeba6b9167e1412",
+    "size": 5157906
   }
 }
